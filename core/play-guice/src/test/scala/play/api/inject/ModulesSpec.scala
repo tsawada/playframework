@@ -92,4 +92,3 @@ class JavaGuiceConfigModule(val environment: JavaEnvironment, val config: Config
 class GuiceConfigModule(val config: Config) extends AbstractModule {
   override def configure(): Unit = ()
 }
-
