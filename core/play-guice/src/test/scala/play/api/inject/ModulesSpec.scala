@@ -62,12 +62,13 @@ class ModulesSpec extends Specification {
     }
 
     "load Guice modules that take a Config" in {
+      val env = Environment.simple()
       val conf = Configuration(
         "play.modules.enabled" -> Seq(
-          classOf[JavaGuiceConfigModule].getName
+          classOf[GuiceConfigModule].getName
         )
       )
-      val located: Seq[Any] = Modules.locate(conf)
+      val located: Seq[Any] = Modules.locate(env, conf)
       located.size must_== 1
       located.head must beLike {
         case mod: GuiceConfigModule =>
