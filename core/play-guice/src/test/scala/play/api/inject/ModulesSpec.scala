@@ -61,7 +61,7 @@ class ModulesSpec extends Specification {
       }
     }
 
-    "load Guice module that take a Config" in {
+    "load Guice modules that take a Config" in {
       val conf = Configuration(
         "play.modules.enabled" -> Seq(
           classOf[JavaGuiceConfigModule].getName
