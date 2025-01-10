@@ -60,6 +60,20 @@ class ModulesSpec extends Specification {
           mod.config must_== conf.underlying
       }
     }
+
+    "load Guice module that take a Config" in {
+      val conf = Configuration(
+        "play.modules.enabled" -> Seq(
+          classOf[JavaGuiceConfigModule].getName
+        )
+      )
+      val located: Seq[Any] = Modules.locate(conf)
+      located.size must_== 1
+      located.head must beLike {
+        case mod: GuiceConfigModule =>
+          mod.config must_== conf.underlying
+      }
+    }
   }
 }
 
@@ -74,3 +88,8 @@ class ScalaGuiceModule(val environment: Environment, val configuration: Configur
 class JavaGuiceConfigModule(val environment: JavaEnvironment, val config: Config) extends AbstractModule {
   override def configure(): Unit = ()
 }
+
+class GuiceConfigModule(val config: Config) extends AbstractModule {
+  override def configure(): Unit = ()
+}
+
