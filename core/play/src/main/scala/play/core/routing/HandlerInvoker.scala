@@ -236,7 +236,8 @@ object HandlerInvokerFactory {
                               )
                             ),
                         Headers(accepted.headers().asScala.map(header => header.getKey -> header.getValue).toSeq*),
-                        accepted.cookies().asScala.map(_.asScala()).toSeq
+                        accepted.cookies().asScala.map(_.asScala()).toSeq,
+                        accepted.session().toScala.map(_.asScala())
                       )
                     )
                   }

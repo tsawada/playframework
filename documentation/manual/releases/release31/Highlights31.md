@@ -61,9 +61,9 @@ The selected subprotocol must be one offered by the client. Selecting any other 
 
 For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Selecting-a-WebSocket-subprotocol]] and [[Java WebSocket documentation|JavaWebSockets#Selecting-a-WebSocket-subprotocol]].
 
-### WebSocket Handshake Headers and Cookies
+### WebSocket Handshake Headers, Cookies, and Sessions
 
-`WebSocket.Accepted` now supports adding custom headers and cookies to the successful `101 Switching Protocols` response:
+`WebSocket.Accepted` now supports adding custom headers, cookies, and session data to the successful `101 Switching Protocols` response:
 
 Scala
 : ```scala
@@ -72,6 +72,7 @@ WebSocket.acceptWithOptions[String, String] { request =>
     .Accepted(flow)
     .withHeaders("X-WebSocket-Trace" -> request.id.toString)
     .withCookies(Cookie("ws-session", "connected", httpOnly = true))
+    .withSession(request.session + ("websocket" -> "connected"))
 }
 ```
 
@@ -80,10 +81,11 @@ Java
 WebSocket.Text.acceptWithOptions(request ->
   new WebSocket.Accepted<>(flow)
     .withHeader("X-WebSocket-Trace", request.id().toString())
-    .withCookies(Cookie.builder("ws-session", "connected").withHttpOnly(true).build()));
+    .withCookies(Cookie.builder("ws-session", "connected").withHttpOnly(true).build())
+    .addingToSession(request, "websocket", "connected"));
 ```
 
-This is useful for applications that need to attach handshake metadata, for example trace identifiers or cookies, while still using Play's WebSocket handling. These headers and cookies are sent only with the opening handshake response. Protocol-owned headers such as `Upgrade`, `Connection`, `Sec-WebSocket-Accept`, and `Sec-WebSocket-Protocol` remain controlled by Play and the selected `subprotocol`.
+This is useful for applications that need to attach handshake metadata, for example trace identifiers, cookies, or session updates, while still using Play's WebSocket handling. These headers, cookies, and session updates are sent only with the opening handshake response. Protocol-owned headers such as `Upgrade`, `Connection`, `Sec-WebSocket-Accept`, and `Sec-WebSocket-Protocol` remain controlled by Play and the selected `subprotocol`.
 
 For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]] and [[Java WebSocket documentation|JavaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]].
 

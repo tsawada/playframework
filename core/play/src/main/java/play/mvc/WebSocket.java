@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -213,6 +214,7 @@ public abstract class WebSocket {
     private final Predicate<CompressionContext> shouldCompress;
     private final List<Map.Entry<String, String>> headers;
     private final List<Http.Cookie> cookies;
+    private final Http.Session session;
 
     public Accepted(
         Flow<In, Out, ?> flow,
@@ -249,7 +251,7 @@ public abstract class WebSocket {
         Optional<String> subprotocol,
         List<Map.Entry<String, String>> headers,
         List<Http.Cookie> cookies) {
-      this(flow, subprotocol, true, DEFAULT_SHOULD_COMPRESS, headers, cookies);
+      this(flow, subprotocol, true, DEFAULT_SHOULD_COMPRESS, headers, cookies, null);
     }
 
     public Accepted(
@@ -258,7 +260,16 @@ public abstract class WebSocket {
         boolean compressionEnabled,
         List<Map.Entry<String, String>> headers,
         List<Http.Cookie> cookies) {
-      this(flow, subprotocol, compressionEnabled, DEFAULT_SHOULD_COMPRESS, headers, cookies);
+      this(flow, subprotocol, compressionEnabled, DEFAULT_SHOULD_COMPRESS, headers, cookies, null);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        Optional<String> subprotocol,
+        List<Map.Entry<String, String>> headers,
+        List<Http.Cookie> cookies,
+        Http.Session session) {
+      this(flow, subprotocol, true, DEFAULT_SHOULD_COMPRESS, headers, cookies, session);
     }
 
     public Accepted(
@@ -268,12 +279,41 @@ public abstract class WebSocket {
         Predicate<CompressionContext> shouldCompress,
         List<Map.Entry<String, String>> headers,
         List<Http.Cookie> cookies) {
+      this(flow, subprotocol, compressionEnabled, shouldCompress, headers, cookies, null);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        Optional<String> subprotocol,
+        boolean compressionEnabled,
+        List<Map.Entry<String, String>> headers,
+        List<Http.Cookie> cookies,
+        Http.Session session) {
+      this(
+          flow,
+          subprotocol,
+          compressionEnabled,
+          DEFAULT_SHOULD_COMPRESS,
+          headers,
+          cookies,
+          session);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        Optional<String> subprotocol,
+        boolean compressionEnabled,
+        Predicate<CompressionContext> shouldCompress,
+        List<Map.Entry<String, String>> headers,
+        List<Http.Cookie> cookies,
+        Http.Session session) {
       this.flow = flow;
       this.subprotocol = subprotocol;
       this.compressionEnabled = compressionEnabled;
       this.shouldCompress = shouldCompress;
       this.headers = Collections.unmodifiableList(new ArrayList<>(headers));
       this.cookies = Collections.unmodifiableList(new ArrayList<>(cookies));
+      this.session = session;
     }
 
     public Accepted(Flow<In, Out, ?> flow, String subprotocol) {
@@ -357,6 +397,10 @@ public abstract class WebSocket {
       return cookies;
     }
 
+    public Optional<Http.Session> session() {
+      return Optional.ofNullable(session);
+    }
+
     /**
      * Return a copy of this accepted WebSocket with the given handshake response header.
      *
@@ -368,7 +412,7 @@ public abstract class WebSocket {
       List<Map.Entry<String, String>> newHeaders = new ArrayList<>(headers);
       newHeaders.add(new AbstractMap.SimpleImmutableEntry<>(name, value));
       return new Accepted<>(
-          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies);
+          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies, session);
     }
 
     /**
@@ -391,7 +435,7 @@ public abstract class WebSocket {
         newHeaders.add(new AbstractMap.SimpleImmutableEntry<>(nameValues[i], nameValues[i + 1]));
       }
       return new Accepted<>(
-          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies);
+          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies, session);
     }
 
     /**
@@ -407,7 +451,7 @@ public abstract class WebSocket {
               .filter(header -> !header.getKey().toLowerCase(Locale.ROOT).equals(lowerName))
               .collect(Collectors.toList());
       return new Accepted<>(
-          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies);
+          flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies, session);
     }
 
     /**
@@ -430,7 +474,7 @@ public abstract class WebSocket {
                   Stream.of(newCookies))
               .collect(Collectors.toList());
       return new Accepted<>(
-          flow, subprotocol, compressionEnabled, shouldCompress, headers, finalCookies);
+          flow, subprotocol, compressionEnabled, shouldCompress, headers, finalCookies, session);
     }
 
     /**
@@ -461,6 +505,83 @@ public abstract class WebSocket {
      */
     public Accepted<In, Out> discardingCookie(String name, String path, String domain) {
       return withCookies(new Http.Cookie(name, "", 0, path, domain, false, true, null, false));
+    }
+
+    /**
+     * @param request Current request
+     * @return The session carried by this WebSocket upgrade response. Reads the given request's
+     *     session if this response does not modify the session.
+     */
+    public Http.Session session(Http.RequestHeader request) {
+      if (session != null) {
+        return session;
+      } else {
+        return request.session();
+      }
+    }
+
+    /**
+     * Sets a new session for this WebSocket upgrade response, discarding the existing session.
+     *
+     * @param session the session to set with this WebSocket upgrade response
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> withSession(Http.Session session) {
+      return new Accepted<>(
+          flow, subprotocol, compressionEnabled, shouldCompress, headers, cookies, session);
+    }
+
+    /**
+     * Sets a new session for this WebSocket upgrade response, discarding the existing session.
+     *
+     * @param session the session to set with this WebSocket upgrade response
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> withSession(Map<String, String> session) {
+      return withSession(new Http.Session(session));
+    }
+
+    /**
+     * Discards the existing session for this WebSocket upgrade response.
+     *
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> withNewSession() {
+      return withSession(Collections.emptyMap());
+    }
+
+    /**
+     * Adds values to this WebSocket upgrade response's session.
+     *
+     * @param values A map with values to add to this response's session
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> addingToSession(
+        Http.RequestHeader request, Map<String, String> values) {
+      return withSession(session(request).adding(values));
+    }
+
+    /**
+     * Adds the given key and value to this WebSocket upgrade response's session.
+     *
+     * @param key The key to add to this response's session
+     * @param value The value to add to this response's session
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> addingToSession(Http.RequestHeader request, String key, String value) {
+      Map<String, String> newValues = new HashMap<>(1);
+      newValues.put(key, value);
+      return addingToSession(request, newValues);
+    }
+
+    /**
+     * Removes values from this WebSocket upgrade response's session.
+     *
+     * @param keys Keys to remove from session
+     * @return the transformed copy
+     */
+    public Accepted<In, Out> removingFromSession(Http.RequestHeader request, String... keys) {
+      return withSession(session(request).removing(keys));
     }
   }
 
@@ -608,7 +729,8 @@ public abstract class WebSocket {
                             accepted.compressionEnabled(),
                             accepted.shouldCompress(),
                             accepted.headers(),
-                            accepted.cookies()));
+                            accepted.cookies(),
+                            accepted.session().orElse(null)));
                   }
                 });
       }

@@ -1073,6 +1073,7 @@ trait WebSocketSpec
               .Accepted(flow)
               .withHeaders("X-WebSocket-Trace" -> "scala-trace")
               .withCookies(Cookie("scala-ws-cookie", "cookie-value", httpOnly = true))
+              .withSession("websocket" -> "connected")
           }
         ) { (app, port) =>
           val (_, responseHeaderSeq): (org.apache.pekko.Done, immutable.Seq[(String, String)]) = runWebSocket(
@@ -1089,6 +1090,9 @@ trait WebSocketSpec
           responseHeaders
             .collect { case ("set-cookie", value) => value }
             .mkString(";") must contain("scala-ws-cookie=cookie-value")
+          responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .mkString(";") must contain("PLAY_SESSION=")
         }
       }
 
@@ -1464,6 +1468,9 @@ trait WebSocketSpec
           responseHeaders
             .collect { case ("set-cookie", value) => value }
             .mkString(";") must contain("java-ws-cookie=cookie-value")
+          responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .mkString(";") must contain("PLAY_SESSION=")
         }
       }
     }
