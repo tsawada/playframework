@@ -12,6 +12,7 @@ import org.apache.pekko.actor.Props
 import org.apache.pekko.stream.scaladsl.Flow
 import org.apache.pekko.util.ByteString
 import play.api.http.websocket._
+import play.api.http.HeaderNames
 import play.api.libs.json._
 import play.api.libs.streams.PekkoStreams
 import play.core.Execution.Implicits.trampoline
@@ -57,6 +58,14 @@ object WebSocket {
     flow.recover { case WebSocketCloseException(close) => close }
   }
 
+  private val ReservedHandshakeResponseHeaders = Set(
+    "connection",
+    "sec-websocket-accept",
+    "sec-websocket-extensions",
+    "sec-websocket-protocol",
+    "upgrade"
+  )
+
   private[play] def firstRequestedSubprotocol(request: RequestHeader): Option[String] = {
     requestedSubprotocols(request).headOption
   }
@@ -70,6 +79,13 @@ object WebSocket {
           s"The application selected WebSocket subprotocol '$selected', but the client offered [${requested.mkString(", ")}]"
         )
       }
+    }
+  }
+
+  private[play] def allowedHandshakeResponseHeaders(headers: Headers): Seq[(String, String)] = {
+    headers.headers.filterNot {
+      case (name, _) =>
+        ReservedHandshakeResponseHeaders(name.toLowerCase(java.util.Locale.ROOT))
     }
   }
 
@@ -105,13 +121,64 @@ object WebSocket {
    * @param shouldCompress selects which outbound text and binary messages to compress after compression is negotiated;
    *                       the default follows the configured compression threshold; this function must not block and
    *                       an exception from it fails the WebSocket stream
+   * @param headers additional HTTP headers to send with the WebSocket upgrade response
+   * @param newCookies additional cookies to send with the WebSocket upgrade response
    */
   case class Accepted[In, Out](
       flow: Flow[In, Out, ?],
       subprotocol: Option[String] = None,
       compressionEnabled: Boolean = true,
-      shouldCompress: CompressionContext => Boolean = defaultShouldCompress
-  )
+      shouldCompress: CompressionContext => Boolean = defaultShouldCompress,
+      headers: Headers = Headers(),
+      newCookies: Seq[Cookie] = Seq.empty
+  ) {
+
+    /**
+     * Adds headers to this WebSocket upgrade response.
+     */
+    def withHeaders(headers: (String, String)*): Accepted[In, Out] = {
+      copy(headers = this.headers.add(headers*))
+    }
+
+    /**
+     * Discards a header from this WebSocket upgrade response.
+     */
+    def discardingHeader(name: String): Accepted[In, Out] = {
+      copy(headers = headers.remove(name))
+    }
+
+    /**
+     * Adds cookies to this WebSocket upgrade response. If the response already contains cookies then cookies with the
+     * same name in the new list will override existing ones.
+     */
+    def withCookies(cookies: Cookie*): Accepted[In, Out] = {
+      val filteredCookies = newCookies.filter(cookie => !cookies.exists(_.name == cookie.name))
+      if (cookies.isEmpty) this else copy(newCookies = filteredCookies ++ cookies)
+    }
+
+    /**
+     * Discards cookies along this WebSocket upgrade response.
+     */
+    def discardingCookies(cookies: DiscardingCookie*): Accepted[In, Out] = {
+      withCookies(cookies.map(_.toCookie)*)
+    }
+
+    private[play] def bakeCookies(
+        cookieHeaderEncoding: CookieHeaderEncoding = new DefaultCookieHeaderEncoding()
+    ): Accepted[In, Out] = {
+      val allCookies = {
+        val setCookieCookies =
+          cookieHeaderEncoding.decodeSetCookieHeader(headers.get(HeaderNames.SET_COOKIE).getOrElse(""))
+        setCookieCookies ++ newCookies
+      }
+
+      if (allCookies.isEmpty) {
+        this
+      } else {
+        withHeaders(HeaderNames.SET_COOKIE -> cookieHeaderEncoding.encodeSetCookieHeader(allCookies))
+      }
+    }
+  }
 
   /**
    * Transforms WebSocket message flows into message flows of another type.
@@ -292,7 +359,9 @@ object WebSocket {
             closeOnException(transformer.transform(accepted.flow)),
             accepted.subprotocol,
             accepted.compressionEnabled,
-            accepted.shouldCompress
+            accepted.shouldCompress,
+            accepted.headers,
+            accepted.newCookies
           )
         })
       }

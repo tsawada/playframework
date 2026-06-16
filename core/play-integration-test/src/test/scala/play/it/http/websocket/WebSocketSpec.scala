@@ -36,6 +36,7 @@ import play.api.libs.json.Json
 import play.api.libs.json.Reads
 import play.api.libs.streams.ActorFlow
 import play.api.libs.ws.WSClient
+import play.api.mvc.Cookie
 import play.api.mvc.Handler
 import play.api.mvc.RequestHeader
 import play.api.mvc.Result
@@ -1064,6 +1065,57 @@ trait WebSocketSpec
         }
       }
 
+      "allow the application to add WebSocket handshake headers and cookies" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            val flow: Flow[String, String, ?] = Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String])
+            WebSocket
+              .Accepted(flow)
+              .withHeaders("X-WebSocket-Trace" -> "scala-trace")
+              .withCookies(Cookie("scala-ws-cookie", "cookie-value", httpOnly = true))
+          }
+        ) { (app, port) =>
+          val (_, responseHeaderSeq): (org.apache.pekko.Done, immutable.Seq[(String, String)]) = runWebSocket(
+            port,
+            { flow =>
+              sendFrames(TextMessage("foo"), CloseMessage(1000)).via(flow).runWith(Sink.ignore)(app.materializer)
+            },
+            None,
+            c => c,
+            CompressionMode.Disabled
+          )
+          val responseHeaders = responseHeaderSeq.map { case (key, value) => (key.toLowerCase, value) }
+          responseHeaders must contain("x-websocket-trace" -> "scala-trace")
+          responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .mkString(";") must contain("scala-ws-cookie=cookie-value")
+        }
+      }
+
+      "ignore application supplied WebSocket protocol-owned handshake headers" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            val flow: Flow[String, String, ?] = Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String])
+            WebSocket
+              .Accepted(flow)
+              .withHeaders("Sec-WebSocket-Protocol" -> "bad-protocol", "X-WebSocket-Trace" -> "allowed")
+          }
+        ) { (app, port) =>
+          val (_, responseHeaderSeq): (org.apache.pekko.Done, immutable.Seq[(String, String)]) = runWebSocket(
+            port,
+            { flow =>
+              sendFrames(TextMessage("foo"), CloseMessage(1000)).via(flow).runWith(Sink.ignore)(app.materializer)
+            },
+            None,
+            c => c,
+            CompressionMode.Disabled
+          )
+          val responseHeaders = responseHeaderSeq.map { case (key, value) => (key.toLowerCase, value) }
+          responseHeaders must contain("x-websocket-trace" -> "allowed")
+          responseHeaders.collect { case ("sec-websocket-protocol", value) => value } must beEmpty
+        }
+      }
+
       // we keep getting timeouts on this test
       // java.util.concurrent.TimeoutException: Futures timed out after [5 seconds] (Helpers.scala:186)
       "close the websocket when the wrong type of frame is received" in {
@@ -1392,6 +1444,26 @@ trait WebSocketSpec
               closeFrame(1003)
             )
           )
+        }
+      }
+
+      "allow adding handshake headers and cookies" in {
+        withServer(_ => WebSocketSpecJavaActions.addHandshakeHeadersAndCookies()) { (app, port) =>
+          import app.materializer
+          val (_, headers) = runWebSocket(
+            port,
+            { flow =>
+              sendFrames(TextMessage("foo"), CloseMessage(1000)).via(flow).runWith(Sink.ignore)
+            },
+            None,
+            c => c,
+            CompressionMode.Disabled
+          )
+          val responseHeaders = headers.map { case (key, value) => (key.toLowerCase, value) }
+          responseHeaders must contain("x-websocket-trace" -> "java-trace")
+          responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .mkString(";") must contain("java-ws-cookie=cookie-value")
         }
       }
     }

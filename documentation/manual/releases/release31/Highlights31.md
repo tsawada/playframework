@@ -61,6 +61,32 @@ The selected subprotocol must be one offered by the client. Selecting any other 
 
 For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Selecting-a-WebSocket-subprotocol]] and [[Java WebSocket documentation|JavaWebSockets#Selecting-a-WebSocket-subprotocol]].
 
+### WebSocket Handshake Headers and Cookies
+
+`WebSocket.Accepted` now supports adding custom headers and cookies to the successful `101 Switching Protocols` response:
+
+Scala
+: ```scala
+WebSocket.acceptWithOptions[String, String] { request =>
+  WebSocket
+    .Accepted(flow)
+    .withHeaders("X-WebSocket-Trace" -> request.id.toString)
+    .withCookies(Cookie("ws-session", "connected", httpOnly = true))
+}
+```
+
+Java
+: ```java
+WebSocket.Text.acceptWithOptions(request ->
+  new WebSocket.Accepted<>(flow)
+    .withHeader("X-WebSocket-Trace", request.id().toString())
+    .withCookies(Cookie.builder("ws-session", "connected").withHttpOnly(true).build()));
+```
+
+This is useful for applications that need to attach handshake metadata, for example trace identifiers or cookies, while still using Play's WebSocket handling. These headers and cookies are sent only with the opening handshake response. Protocol-owned headers such as `Upgrade`, `Connection`, `Sec-WebSocket-Accept`, and `Sec-WebSocket-Protocol` remain controlled by Play and the selected `subprotocol`.
+
+For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]] and [[Java WebSocket documentation|JavaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]].
+
 ### WebSocket Abnormal Closure Status
 
 Play now reports abnormal WebSocket connection loss to raw WebSocket handlers with close status `1006`.
