@@ -127,16 +127,16 @@ trait WebSocketCompressionSpec extends WebSocketSpecMethods {
 
     "not negotiate compression when websocket compression is disabled" in {
       withServer(
-        app => WebSocket.accept[String, String] { req => Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String]) },
+        app =>
+          WebSocket.accept[String, String] { req =>
+            Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message"))
+          },
         Map("play.server.websocket.compression.enabled" -> false)
       ) { (app, port) =>
         import app.materializer
-        val (_, headers) = runWebSocket(
+        val (frames, headers) = runWebSocket(
           port,
-          { flow =>
-            Source.empty[ExtendedMessage].via(flow).runWith(Sink.ignore)
-            Future.successful(())
-          },
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
           subprotocol = None,
           handleConnect = c => c,
           compressionMode = CompressionMode.RequestOnly()
@@ -145,6 +145,38 @@ trait WebSocketCompressionSpec extends WebSocketSpecMethods {
         headers.collectFirst {
           case (name, value) if name.equalsIgnoreCase("Sec-WebSocket-Extensions") => value
         } must beNone
+
+        frames.collectFirst {
+          case SimpleMessage(TextMessage(data), true) => data
+        } must beSome("plain server message")
+      }
+    }
+
+    "not negotiate compression when compression is disabled for the accepted WebSocket" in {
+      withServer(app =>
+        WebSocket.acceptWithOptions[String, String] { req =>
+          WebSocket.Accepted(
+            Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message")),
+            compressionEnabled = false
+          )
+        }
+      ) { (app, port) =>
+        import app.materializer
+        val (frames, headers) = runWebSocket(
+          port,
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+          subprotocol = None,
+          handleConnect = c => c,
+          compressionMode = CompressionMode.RequestOnly()
+        )
+
+        headers.collectFirst {
+          case (name, value) if name.equalsIgnoreCase("Sec-WebSocket-Extensions") => value
+        } must beNone
+
+        frames.collectFirst {
+          case SimpleMessage(TextMessage(data), true) => data
+        } must beSome("plain server message")
       }
     }
 
@@ -850,6 +882,30 @@ trait WebSocketSpec
             .map { case (key, value) => (key.toLowerCase, value) }
             .collect { case ("sec-websocket-protocol", selectedProtocol) => selectedProtocol }
             .head must be).equalTo("graphql-transport-ws")
+        }
+      }
+
+      "allow selecting a subprotocol while disabling compression" in {
+        withServer(_ => WebSocketSpecJavaActions.selectSubprotocolWithoutCompression()) { (app, port) =>
+          import app.materializer
+          val (frames, headers) = runWebSocket(
+            port,
+            { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+            Some("graphql-ws, graphql-transport-ws"),
+            c => c,
+            CompressionMode.RequestOnly()
+          )
+
+          (headers
+            .map { case (key, value) => (key.toLowerCase, value) }
+            .collect { case ("sec-websocket-protocol", selectedProtocol) => selectedProtocol }
+            .head must be).equalTo("graphql-transport-ws")
+          headers.collectFirst {
+            case (name, value) if name.equalsIgnoreCase("Sec-WebSocket-Extensions") => value
+          } must beNone
+          frames.collectFirst {
+            case SimpleMessage(TextMessage(data), true) => data
+          } must beSome("plain server message")
         }
       }
 

@@ -157,18 +157,33 @@ public abstract class WebSocket {
   public static class Accepted<In, Out> {
     private final Flow<In, Out, ?> flow;
     private final Optional<String> subprotocol;
+    private final boolean compressionEnabled;
 
-    public Accepted(Flow<In, Out, ?> flow, Optional<String> subprotocol) {
+    public Accepted(
+        Flow<In, Out, ?> flow, Optional<String> subprotocol, boolean compressionEnabled) {
       this.flow = flow;
       this.subprotocol = subprotocol;
+      this.compressionEnabled = compressionEnabled;
+    }
+
+    public Accepted(Flow<In, Out, ?> flow, Optional<String> subprotocol) {
+      this(flow, subprotocol, true);
     }
 
     public Accepted(Flow<In, Out, ?> flow, String subprotocol) {
       this(flow, Optional.of(subprotocol));
     }
 
+    public Accepted(Flow<In, Out, ?> flow, String subprotocol, boolean compressionEnabled) {
+      this(flow, Optional.of(subprotocol), compressionEnabled);
+    }
+
     public Accepted(Flow<In, Out, ?> flow) {
       this(flow, Optional.empty());
+    }
+
+    public Accepted(Flow<In, Out, ?> flow, boolean compressionEnabled) {
+      this(flow, Optional.empty(), compressionEnabled);
     }
 
     public Flow<In, Out, ?> flow() {
@@ -177,6 +192,14 @@ public abstract class WebSocket {
 
     public Optional<String> subprotocol() {
       return subprotocol;
+    }
+
+    /**
+     * Returns whether this accepted WebSocket may negotiate compression when compression is enabled
+     * in the server configuration. Returning {@code true} does not enable compression globally.
+     */
+    public boolean compressionEnabled() {
+      return compressionEnabled;
     }
   }
 
@@ -317,7 +340,9 @@ public abstract class WebSocket {
                             Flow.<Message>create().collect(inMapper),
                             play.api.libs.streams.PekkoStreams.onlyFirstCanFinishMerge(2),
                             accepted.flow().map(outMapper::apply));
-                    return F.Either.Right(new Accepted<>(flow, accepted.subprotocol()));
+                    return F.Either.Right(
+                        new Accepted<>(
+                            flow, accepted.subprotocol(), accepted.compressionEnabled()));
                   }
                 });
       }

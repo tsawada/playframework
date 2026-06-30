@@ -36,11 +36,16 @@ object WebSocketHandler {
       flow: Flow[Message, Message, ?],
       bufferLimit: Int,
       subprotocol: Option[String],
+      compressionEnabled: Boolean,
       wsKeepAliveMode: String,
       wsKeepAliveMaxIdle: Duration,
   ): HttpResponse = upgrade match {
     case lowLevel: UpgradeToWebSocketLowLevel =>
-      lowLevel.handleFrames(messageFlowToFrameFlow(flow, bufferLimit, wsKeepAliveMode, wsKeepAliveMaxIdle), subprotocol)
+      lowLevel.handleFrames(
+        messageFlowToFrameFlow(flow, bufferLimit, wsKeepAliveMode, wsKeepAliveMaxIdle),
+        subprotocol,
+        compressionEnabled
+      )
     case other =>
       throw new IllegalArgumentException("WebSocketUpgrade is not an Pekko HTTP UpgradeToWebsocketLowLevel")
   }

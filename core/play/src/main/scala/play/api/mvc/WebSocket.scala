@@ -65,8 +65,14 @@ object WebSocket {
    *
    * @param flow the flow that handles WebSocket messages
    * @param subprotocol the WebSocket subprotocol selected by the application, if any
+   * @param compressionEnabled whether this accepted WebSocket may negotiate compression when compression is enabled in
+   *                           the server configuration; setting this to `true` does not enable compression globally
    */
-  case class Accepted[In, Out](flow: Flow[In, Out, ?], subprotocol: Option[String] = None)
+  case class Accepted[In, Out](
+      flow: Flow[In, Out, ?],
+      subprotocol: Option[String] = None,
+      compressionEnabled: Boolean = true
+  )
 
   /**
    * Transforms WebSocket message flows into message flows of another type.
@@ -243,7 +249,11 @@ object WebSocket {
 
       override def applyWithOptions(request: RequestHeader): Future[Either[Result, Accepted[Message, Message]]] = {
         f(request).map(_.map { accepted =>
-          Accepted(closeOnException(transformer.transform(accepted.flow)), accepted.subprotocol)
+          Accepted(
+            closeOnException(transformer.transform(accepted.flow)),
+            accepted.subprotocol,
+            accepted.compressionEnabled
+          )
         })
       }
     }
