@@ -29,8 +29,8 @@ jobs:
       - id: pekko-snapshots
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            PEKKO_VERSION=$(curl -s https://repository.apache.org/content/repositories/snapshots/org/apache/pekko/pekko-actor_2.13/ | grep -oEi '1\.1\.[0-9]+\-[RCM0-9]+\+[0-9]+-[0-9a-f]{8}-SNAPSHOT' | sort -V | tail -n 1)
-            PEKKO_HTTP_VERSION=$(curl -s https://repository.apache.org/content/repositories/snapshots/org/apache/pekko/pekko-http-core_2.13/ | grep -oEi '1\.1\.[0-9]+\-[RCM0-9]+\+[0-9]+-[0-9a-f]{8}-SNAPSHOT' | sort -V | tail -n 1)
+            PEKKO_VERSION=$(curl -s https://repository.apache.org/content/repositories/snapshots/org/apache/pekko/pekko-actor_2.13/ | grep -oEi '2\.0\.[0-9]+\-[RCM0-9]+\+[0-9]+-[0-9a-f]{8}-SNAPSHOT' | sort -V | tail -n 1)
+            PEKKO_HTTP_VERSION=$(curl -s https://repository.apache.org/content/repositories/snapshots/org/apache/pekko/pekko-http-core_2.13/ | grep -oEi '2\.0\.[0-9]+\-[RCM0-9]+\+[0-9]+-[0-9a-f]{8}-SNAPSHOT' | sort -V | tail -n 1)
             echo "pekko_opts=-Dpekko.version=$PEKKO_VERSION" >> $GITHUB_OUTPUT
             echo "pekko_http_opts=-Dpekko.http.version=$PEKKO_HTTP_VERSION" >> $GITHUB_OUTPUT
           else
