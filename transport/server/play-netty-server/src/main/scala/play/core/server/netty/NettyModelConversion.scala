@@ -182,7 +182,7 @@ private[server] class NettyModelConversion(
       val response: HttpResponse = result.body match {
         case any if skipEntity =>
           resultUtils.cancelEntity(any)
-          new DefaultFullHttpResponse(httpVersion, responseStatus, Unpooled.EMPTY_BUFFER)
+          new HeadHttpResponse(httpVersion, responseStatus)
 
         case HttpEntity.Strict(data, _) =>
           new DefaultFullHttpResponse(httpVersion, responseStatus, byteStringToByteBuf(data))
@@ -202,7 +202,19 @@ private[server] class NettyModelConversion(
       }
 
       // Content type and length
-      if (resultUtils.mayHaveEntity(result.header.status)) {
+      if (skipEntity) {
+        if (HttpUtil.isContentLengthSet(response)) {
+          val manualContentLength = response.headers.get(CONTENT_LENGTH)
+          logger.warn(
+            s"Ignoring manual Content-Length ($manualContentLength) since it is not rendered for HEAD responses."
+          )
+          response.headers.remove(CONTENT_LENGTH)
+        }
+        // HttpStreamsServerHandler is not HEAD-aware. Without Content-Length or Transfer-Encoding it assumes a 200
+        // response can only be delimited by closing the connection. Mark it as chunked inside the Netty pipeline so
+        // keep-alive is preserved; PlayHttpResponseEncoder strips the marker before bytes are written.
+        HttpUtil.setTransferEncodingChunked(response, true)
+      } else if (resultUtils.mayHaveEntity(result.header.status)) {
         result.body.contentLength.foreach { contentLength =>
           if (HttpUtil.isContentLengthSet(response)) {
             val manualContentLength = response.headers.get(CONTENT_LENGTH)

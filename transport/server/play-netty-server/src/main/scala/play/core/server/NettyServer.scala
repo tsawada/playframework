@@ -272,7 +272,7 @@ class NettyServer(
 
       // Netty HTTP decoders/encoders/etc
       pipeline.addLast("decoder", new HttpRequestDecoder(maxInitialLineLength, maxHeaderSize, maxChunkSize))
-      pipeline.addLast("encoder", new HttpResponseEncoder())
+      pipeline.addLast("encoder", new PlayHttpResponseEncoder())
       pipeline.addLast("decompressor", new HttpContentDecompressor())
       if (logWire) {
         pipeline.addLast("logging", new LoggingHandler(LogLevel.DEBUG))
