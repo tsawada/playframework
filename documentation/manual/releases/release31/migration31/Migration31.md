@@ -20,6 +20,26 @@ TBD
 
 TBD
 
+### HEAD responses no longer include generated Content-Length headers
+
+Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.
+
+This behavior follows Pekko HTTP 2, which changed generated `Content-Length` rendering in [apache/pekko-http#962](https://github.com/apache/pekko-http/pull/962), ported from [akka/akka-http#4214](https://github.com/akka/akka-http/pull/4214). The original upstream change fixed response framing for statuses such as `205 Reset Content` and made `Content-Length` rendering depend on the request method and response status.
+
+If your tests compare `HEAD` and `GET` response headers, exclude `Content-Length` from that comparison. If your application needs to expose resource size metadata for `HEAD` requests, use an application-specific header.
+
+### Clustered Pekko applications may require additional JVM add-opens
+
+Applications that configure the Play ActorSystem as a Pekko cluster, including applications using Play's cluster-sharding module, start Pekko Remote/Artery TCP. Artery TCP depends on Agrona, which accesses `jdk.internal.misc.Unsafe` on the JVM.
+
+On strongly encapsulated JDKs this can require the following JVM option:
+
+```text
+--add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
+```
+
+Add this option to the JVM that runs the application or tests when using clustered Pekko/Artery TCP and you see an access failure involving `org.agrona.UnsafeApi` and `jdk.internal.misc.Unsafe`.
+
 ### Java form binding no longer depends on Spring Framework libraries
 
 Historically, Play's Java form binding used Spring Framework libraries, going back to the beginning of Play 2. Starting with this release, Play owns the form binding code it needs internally and registers the supported default conversions through Play's `Formatters` infrastructure.
