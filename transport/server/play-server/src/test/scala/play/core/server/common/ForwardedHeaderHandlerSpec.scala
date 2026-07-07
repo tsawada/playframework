@@ -359,12 +359,32 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("203.0.113.43", false, None)
     }
 
-    "assume http protocol with x-forwarded when proto list is shorter than for list and all addresses are trusted" in {
+    "associate a single x-forwarded-proto with the client when trustSingleForwardedProto is enabled" in {
       remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("0.0.0.0/0"),
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleForwardedProto(true),
         """
           |X-Forwarded-For: 203.0.113.43, 192.168.1.43
           |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual RemoteConnection("203.0.113.43", true, None)
+    }
+
+    "associate a single x-forwarded-proto with the client when trustSingleForwardedProto is enabled and all addresses are trusted" in {
+      remoteConnectionToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual RemoteConnection("203.0.113.43", true, None)
+    }
+
+    "assume http protocol with x-forwarded when proto list has multiple entries shorter than for list even when trustSingleForwardedProto is enabled" in {
+      remoteConnectionToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
+          |X-Forwarded-Proto: https, https
         """.stripMargin
       ) mustEqual RemoteConnection("203.0.113.43", false, None)
     }
@@ -497,6 +517,10 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def trustedProxies(s: String*) = {
     Map("play.http.forwarded.trustedProxies" -> s)
+  }
+
+  def trustSingleForwardedProto(b: Boolean) = {
+    Map("play.http.forwarded.trustSingleForwardedProto" -> b)
   }
 
   def headers(s: String): Headers = {
