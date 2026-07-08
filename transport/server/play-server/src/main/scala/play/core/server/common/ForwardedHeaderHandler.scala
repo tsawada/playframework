@@ -36,7 +36,7 @@ import ForwardedHeaderHandler._
  * Each address is associated with a secure or insecure protocol by pairing
  * it with a `proto` entry in the headers. If the `proto` entry is missing, or if
  * `proto` entries can't be matched with addresses, then the default is insecure.
- * When `play.http.forwarded.trustSingleForwardedProto` is enabled, a lone
+ * When `play.http.forwarded.trustSingleXForwardedProto` is enabled, a lone
  * `X-Forwarded-Proto` entry is associated with the client address instead of
  * being discarded.
  *
@@ -151,7 +151,7 @@ private[server] object ForwardedHeaderHandler {
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
       trustedProxies: List[Subnet],
-      trustSingleForwardedProto: Boolean = false
+      trustSingleXForwardedProto: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -204,7 +204,7 @@ private[server] object ForwardedHeaderHandler {
           forHeaders.lazyZip(protoHeaders).map { (f, p) =>
             ForwardedEntry(Some(f), Some(p))
           }
-        } else if (trustSingleForwardedProto && protoHeaders.length == 1) {
+        } else if (trustSingleXForwardedProto && forHeaders.nonEmpty && protoHeaders.length == 1) {
           // A single X-Forwarded-Proto entry describes the protocol the client used to reach
           // the outermost proxy. Associate it with the client (the first X-Forwarded-For
           // entry); the remaining entries are left without a protocol.
@@ -269,7 +269,7 @@ private[server] object ForwardedHeaderHandler {
       ForwardedHeaderHandlerConfig(
         version,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        config.getOptional[Boolean]("trustSingleForwardedProto").getOrElse(false)
+        config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false)
       )
     }
   }
