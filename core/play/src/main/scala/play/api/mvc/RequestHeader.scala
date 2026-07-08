@@ -116,6 +116,13 @@ trait RequestHeader {
   final def remoteAddress: String = connection.remoteAddressString
 
   /**
+   * The client port, if known.
+   *
+   * This method delegates to `connection.remotePort`.
+   */
+  final def remotePort: Option[Int] = connection.remotePort
+
+  /**
    * Is the client using SSL? This method delegates to `connection.secure`.
    */
   final def secure: Boolean = connection.secure

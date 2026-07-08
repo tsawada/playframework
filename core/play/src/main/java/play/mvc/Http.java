@@ -233,6 +233,15 @@ public class Http {
     String remoteAddress();
 
     /**
+     * The client port, if known.
+     *
+     * @return the remote port
+     */
+    default Optional<Integer> remotePort() {
+      return Optional.empty();
+    }
+
+    /**
      * @return true if the client is using SSL
      */
     boolean secure();
@@ -1115,6 +1124,7 @@ public class Http {
           req.withConnection(
               RemoteConnection$.MODULE$.apply(
                   req.connection().remoteAddress(),
+                  req.connection().remotePort(),
                   secure,
                   req.connection().clientCertificateChain()));
       return this;
@@ -1333,6 +1343,15 @@ public class Http {
     }
 
     /**
+     * @return the remote port, if known
+     */
+    @SuppressWarnings("unchecked")
+    public Optional<Integer> remotePort() {
+      return (Optional<Integer>)
+          (Optional<?>) OptionConverters.toJava(req.connection().remotePort());
+    }
+
+    /**
      * @param remoteAddress sets the remote address
      * @return the builder instance
      */
@@ -1341,9 +1360,36 @@ public class Http {
           req.withConnection(
               RemoteConnection$.MODULE$.apply(
                   remoteAddress,
+                  req.connection().remotePort(),
                   req.connection().secure(),
                   req.connection().clientCertificateChain()));
       return this;
+    }
+
+    /**
+     * @param remotePort sets the remote port
+     * @return the builder instance
+     */
+    @SuppressWarnings("unchecked")
+    public RequestBuilder remotePort(Optional<Integer> remotePort) {
+      scala.Option<Object> scalaRemotePort =
+          (scala.Option<Object>) (scala.Option<?>) OptionConverters.toScala(remotePort);
+      req =
+          req.withConnection(
+              RemoteConnection$.MODULE$.apply(
+                  req.connection().remoteAddress(),
+                  scalaRemotePort,
+                  req.connection().secure(),
+                  req.connection().clientCertificateChain()));
+      return this;
+    }
+
+    /**
+     * @param remotePort sets the remote port
+     * @return the builder instance
+     */
+    public RequestBuilder remotePort(int remotePort) {
+      return remotePort(Optional.of(remotePort));
     }
 
     /**
@@ -1363,6 +1409,7 @@ public class Http {
           req.withConnection(
               RemoteConnection$.MODULE$.apply(
                   req.connection().remoteAddress(),
+                  req.connection().remotePort(),
                   req.connection().secure(),
                   OptionConverters.toScala(
                       Optional.ofNullable(Scala.asScala(clientCertificateChain)))));
