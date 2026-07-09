@@ -133,6 +133,19 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
+    "expose rfc7239 by entries on the selected remote connection" in {
+      val connection = remoteConnectionToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for=203.0.113.43;by=192.0.2.10;proto=https
+        """.stripMargin
+      )
+
+      connection.remoteNode must beEqualTo(RemoteNode.Ip(addr("203.0.113.43"), None))
+      connection.byNode must beSome(RemoteNode.Ip(addr("192.0.2.10"), None))
+      connection.secure must beTrue
+    }
+
     "parse x-forwarded entries" in {
       val results = processHeaders(
         version("x-forwarded") ++ trustedProxies("2001:db8:cafe::17"),
@@ -217,7 +230,14 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |Forwarded: for=192.0.2.60;proto=http;by=203.0.113.43
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
-      ) mustEqual RemoteConnection("192.0.2.60", false, None)
+      ) mustEqual RemoteConnection(
+        addr("192.0.2.60"),
+        RemoteNode.Ip(addr("192.0.2.60"), None),
+        None,
+        Some(RemoteNode.Ip(addr("203.0.113.43"), None)),
+        secure = false,
+        None
+      )
     }
 
     "get first untrusted proxy protocol with rfc7239 with trusted localhost proxy" in {
@@ -241,7 +261,14 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |Forwarded: for=192.0.2.60;proto=https;by=203.0.113.43
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
-      ) mustEqual RemoteConnection("192.0.2.60", true, None)
+      ) mustEqual RemoteConnection(
+        addr("192.0.2.60"),
+        RemoteNode.Ip(addr("192.0.2.60"), None),
+        None,
+        Some(RemoteNode.Ip(addr("203.0.113.43"), None)),
+        secure = true,
+        None
+      )
     }
 
     "handle IPv6 addresses with rfc7239" in {

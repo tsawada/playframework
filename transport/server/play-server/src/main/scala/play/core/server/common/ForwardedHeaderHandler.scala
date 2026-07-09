@@ -86,6 +86,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
     // All public methods delegate to the lazily calculated connection info
     override def remoteAddress: InetAddress                           = parsed.remoteAddress
     override def remoteNode: RemoteNode                               = parsed.remoteNode
+    override def byNode: Option[RemoteNode]                           = parsed.byNode
     override def remoteIpAddress: Option[InetAddress]                 = parsed.remoteIpAddress
     override def remotePort: Option[Int]                              = parsed.remotePort
     override def secure: Boolean                                      = parsed.secure
@@ -123,6 +124,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                   parsedEntry.address,
                   parsedEntry.remoteNode,
                   parsedEntry.remotePort,
+                  parsedEntry.byNode,
                   parsedEntry.secure,
                   None /* No cert chain for forward headers */
                 )
