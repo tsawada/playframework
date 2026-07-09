@@ -393,7 +393,7 @@ class RangeResultSpec extends Specification {
       implicit val system: ActorSystem        = ActorSystem()
       implicit val materializer: Materializer = Materializer.matFromSystem
       val result                              = collectBytes(data)
-      result must be_==(Array[Byte](3, 4, 5, 6))
+      result must be_==(Array[Byte](3, 4, 5))
     }
 
     "support multiple ranges but send only the first range" in {

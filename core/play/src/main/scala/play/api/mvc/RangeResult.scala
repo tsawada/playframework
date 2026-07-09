@@ -434,7 +434,7 @@ object RangeResult {
         // The returned Source may start partway into the source data, so take that into account
         val start = byteRange.start - offset
 
-        val entitySource = source.via(sliceBytesTransformer(start, firstRange.length))
+        val entitySource = source.via(sliceBytesTransformer(start, Some(byteRange.length + 1)))
 
         Result(
           ResponseHeader(
