@@ -571,8 +571,11 @@ object BuildSettings {
       ProblemFilters.exclude[IncompatibleMethTypeProblem](
         "org.apache.pekko.http.play.WebSocketHandler.handleWebSocket"
       ),
-      // ForwardedEntry and ParsedForwardedEntry are private server internals.
-      // Their case class signatures changed to carry forwarded port values.
+      // ForwardedHeaderHandler parser models are private server internals.
+      // Their signatures changed to carry forwarded port values and RFC 7239 remote identities.
+      ProblemFilters.exclude[DirectMissingMethodProblem](
+        "play.core.server.common.ForwardedHeaderHandler#ForwardedHeaderHandlerConfig.parseEntry"
+      ),
       ProblemFilters.exclude[DirectMissingMethodProblem](
         "play.core.server.common.ForwardedHeaderHandler#ForwardedEntry.apply"
       ),
@@ -593,6 +596,12 @@ object BuildSettings {
       ),
       ProblemFilters.exclude[IncompatibleResultTypeProblem](
         "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.copy$default$2"
+      ),
+      ProblemFilters.exclude[IncompatibleResultTypeProblem](
+        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.copy$default$1"
+      ),
+      ProblemFilters.exclude[IncompatibleResultTypeProblem](
+        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry._1"
       ),
       ProblemFilters.exclude[IncompatibleResultTypeProblem](
         "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry._2"
