@@ -133,6 +133,52 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
+    "parse rfc7239 quoted-pair escapes in forwarded nodes" in {
+      val results = processHeaders(
+        version("rfc7239") ++ trustedProxies(),
+        headers(
+          """
+            |Forwarded: for="_edge\.1";by="_proxy\-1"
+          """.stripMargin
+        )
+      )
+
+      results(0)._1 must_== ForwardedEntry(Some("_edge.1"), None, byString = Some("_proxy-1"))
+      results(0)._2 must beRight(
+        ParsedForwardedEntry(
+          RemoteNode.Obfuscated("_edge.1", None),
+          None,
+          None,
+          false,
+          Some(RemoteNode.Obfuscated("_proxy-1", None))
+        )
+      )
+    }
+
+    "parse rfc7239 lists and parameters with separators inside quoted strings" in {
+      val results = processHeaders(
+        version("rfc7239") ++ trustedProxies(),
+        headers(
+          """
+            |Forwarded: for="_bad,stillbad";proto=https, for=203.0.113.43
+            |Forwarded: for="_bad;stillbad";proto=https, for=198.51.100.17
+            |Forwarded: for="_bad=stillbad";proto=https, for=192.0.2.43
+          """.stripMargin
+        )
+      )
+
+      results.map(_._1) must containTheSameElementsAs(
+        Seq(
+          ForwardedEntry(Some("_bad,stillbad"), Some("https")),
+          ForwardedEntry(Some("203.0.113.43"), None),
+          ForwardedEntry(Some("_bad;stillbad"), Some("https")),
+          ForwardedEntry(Some("198.51.100.17"), None),
+          ForwardedEntry(Some("_bad=stillbad"), Some("https")),
+          ForwardedEntry(Some("192.0.2.43"), None)
+        )
+      )
+    }
+
     "expose rfc7239 by entries on the selected remote connection" in {
       val connection = remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
