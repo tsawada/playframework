@@ -163,13 +163,14 @@ private[server] object ForwardedHeaderHandler {
   type HeaderParser = Headers => Seq[ForwardedEntry]
 
   /**
-   * An unparsed address, protocol, and port from a forwarded header. Each value is
-   * optional.
+   * An unparsed address, protocol, port, and receiving proxy node from a forwarded
+   * header. Each value is optional.
    */
   final case class ForwardedEntry(
       addressString: Option[String],
       protoString: Option[String],
-      portString: Option[String] = None
+      portString: Option[String] = None,
+      byString: Option[String] = None
   )
 
   /**
@@ -182,7 +183,8 @@ private[server] object ForwardedHeaderHandler {
       remoteNode: RemoteNode,
       fallbackAddress: Option[InetAddress],
       remotePort: Option[Int],
-      secure: Boolean
+      secure: Boolean,
+      byNode: Option[RemoteNode] = None
   ) {
     def remoteIpAddress: Option[InetAddress] = remoteNode match {
       case RemoteNode.Ip(address, _) => Some(address)
@@ -254,7 +256,9 @@ private[server] object ForwardedHeaderHandler {
           }
           .toMap
 
-        params.map { (paramMap: Map[String, String]) => ForwardedEntry(paramMap.get("for"), paramMap.get("proto")) }
+        params.map { (paramMap: Map[String, String]) =>
+          ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
+        }
       }
 
       case Xforwarded =>
@@ -308,6 +312,10 @@ private[server] object ForwardedHeaderHandler {
         entry: ForwardedEntry,
         fallbackAddress: Option[InetAddress] = None
     ): Either[String, ParsedForwardedEntry] = {
+      val byNode = entry.byString.flatMap { byString =>
+        parseRemoteNode(byString).toOption
+      }
+
       entry.addressString match {
         case None =>
           // We had a forwarding header, but it was missing the address entry for some reason.
@@ -321,13 +329,19 @@ private[server] object ForwardedHeaderHandler {
                 nodePort.collect { case PortNumber(port) => port }
               }
               val connection =
-                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure)
+                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure, byNode)
               Right(connection)
             case Right((UnknownIp, nodePort)) =>
               // RFC 7239 allows "unknown" when the proxy cannot or does not want to disclose the node.
               val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val connection =
-                ParsedForwardedEntry(RemoteNode.Unknown(nodePort.flatMap(portString)), fallbackAddress, None, secure)
+                ParsedForwardedEntry(
+                  RemoteNode.Unknown(nodePort.flatMap(portString)),
+                  fallbackAddress,
+                  None,
+                  secure,
+                  byNode
+                )
               Right(connection)
             case Right((ObfuscatedIp(identifier), nodePort)) =>
               // RFC 7239 allows obfuscated identifiers such as "_hidden" to avoid disclosing the node.
@@ -337,13 +351,25 @@ private[server] object ForwardedHeaderHandler {
                   RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString)),
                   fallbackAddress,
                   None,
-                  secure
+                  secure,
+                  byNode
                 )
               Right(connection)
             case errorOrNonIp =>
               // The forwarding address entry couldn't be parsed for some reason.
               Left(s"Parse error: $errorOrNonIp")
           }
+      }
+    }
+
+    private def parseRemoteNode(nodeString: String): Either[String, RemoteNode] = {
+      nodeIdentifierParser.parseNode(nodeString).map {
+        case (Ip(address), nodePort) =>
+          RemoteNode.Ip(address, nodePort.collect { case PortNumber(port) => port })
+        case (UnknownIp, nodePort) =>
+          RemoteNode.Unknown(nodePort.flatMap(portString))
+        case (ObfuscatedIp(identifier), nodePort) =>
+          RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString))
       }
     }
 
