@@ -10,15 +10,19 @@ import java.security.cert.X509Certificate
 import scala.annotation.tailrec
 
 import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.RemoteConnection.RemoteNode
 import play.api.mvc.Headers
 import play.api.Configuration
 import play.api.Logger
 import play.core.server.common.NodeIdentifierParser.Ip
+import play.core.server.common.NodeIdentifierParser.ObfuscatedIp
+import play.core.server.common.NodeIdentifierParser.ObfuscatedPort
 import play.core.server.common.NodeIdentifierParser.PortNumber
+import play.core.server.common.NodeIdentifierParser.UnknownIp
 import ForwardedHeaderHandler._
 
 /**
- * The ForwardedHeaderHandler class works out the remote address and protocol
+ * The ForwardedHeaderHandler class works out the remote identity, address, port, and protocol
  * by taking
  * into account Forward and X-Forwarded-* headers from trusted proxies. The
  * algorithm it uses is as follows:
@@ -30,11 +34,13 @@ import ForwardedHeaderHandler._
  *    checking whether the immediate connection is in our list of trusted
  *    proxies.
  * 4. If the immediate connection *is* a trusted proxy, then resume at step
- *    1 using the connection info in the forwarded header.
+ *    1 using the connection info in the forwarded header. If the forwarded
+ *    identity is not an IP address, keep it as the selected remote identity
+ *    and stop scanning because trusted proxies are configured as IP ranges.
  * 5. If the immediate connection *is not* a trusted proxy, then return the
  *    immediate connection info and don't do any further processing.
  *
- * Each address is associated with a port and a secure or insecure protocol by
+ * Each identity is associated with a port and a secure or insecure protocol by
  * pairing it with a `port` and `proto` entry in the headers. If the `proto`
  * entry is missing, or if `proto` entries can't be matched with addresses,
  * then the default is insecure.
@@ -56,7 +62,7 @@ import ForwardedHeaderHandler._
  *   </dd>
  *   <dt>play.http.forwarded.trustedProxies</dt>
  *   <dd>
- *     A list of proxies that are ignored when getting the remote address or the remote port.
+ *     A list of proxies that are ignored when getting the remote identity, remote address, or remote port.
  *     It can have optionally an address block size. When the address block size is set,
  *     all IP-addresses in the range of the subnet will be treated as trusted.
  *   </dd>
@@ -74,6 +80,8 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
   def forwardedConnection(rawConnection: RemoteConnection, headers: Headers): RemoteConnection = new RemoteConnection {
     // All public methods delegate to the lazily calculated connection info
     override def remoteAddress: InetAddress                           = parsed.remoteAddress
+    override def remoteNode: RemoteNode                               = parsed.remoteNode
+    override def remoteIpAddress: Option[InetAddress]                 = parsed.remoteIpAddress
     override def remotePort: Option[Int]                              = parsed.remotePort
     override def secure: Boolean                                      = parsed.secure
     override def clientCertificateChain: Option[Seq[X509Certificate]] = parsed.clientCertificateChain
@@ -95,24 +103,29 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
           // There is a forwarded header from 'prev', so lets check if 'prev' is trusted.
           // If it's a trusted proxy then process the header, otherwise just use 'prev'.
 
-          if (configuration.isTrustedProxy(prev.remoteAddress)) {
+          val previousAddress = prev.remoteIpAddress
+          if (previousAddress.exists(configuration.isTrustedProxy)) {
             // 'prev' is a trusted proxy, so we process the next entry.
             val entry = headerEntries.next()
-            configuration.parseEntry(entry) match {
+            configuration.parseEntry(entry, previousAddress) match {
               case Left(error) =>
                 ForwardedHeaderHandler.logger.debug(
                   s"Error with info in forwarding header $entry, using $prev instead: $error."
                 )
                 prev
               case Right(parsedEntry) =>
-                scan(
-                  RemoteConnection(
-                    parsedEntry.address,
-                    parsedEntry.remotePort,
-                    parsedEntry.secure,
-                    None /* No cert chain for forward headers */
-                  )
+                val connection = RemoteConnection(
+                  parsedEntry.address,
+                  parsedEntry.remoteNode,
+                  parsedEntry.remotePort,
+                  parsedEntry.secure,
+                  None /* No cert chain for forward headers */
                 )
+                if (parsedEntry.remoteIpAddress.isDefined) {
+                  scan(connection)
+                } else {
+                  connection
+                }
             }
           } else {
             // 'prev' is not a trusted proxy, so we don't scan ahead in the list of
@@ -156,12 +169,23 @@ private[server] object ForwardedHeaderHandler {
 
   /**
    * Basic information about an HTTP connection, parsed from a ForwardedEntry.
+   * `remoteNode` is the selected forwarded identity. `fallbackAddress` is the
+   * previous trusted proxy address used for legacy remote address APIs when the
+   * selected identity is not an IP address.
    */
   final case class ParsedForwardedEntry(
-      address: InetAddress,
+      remoteNode: RemoteNode,
+      fallbackAddress: Option[InetAddress],
       remotePort: Option[Int],
       secure: Boolean
-  )
+  ) {
+    def remoteIpAddress: Option[InetAddress] = remoteNode match {
+      case RemoteNode.Ip(address, _) => Some(address)
+      case _                         => None
+    }
+
+    def address: InetAddress = remoteIpAddress.orElse(fallbackAddress).get
+  }
 
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
@@ -189,6 +213,11 @@ private[server] object ForwardedHeaderHandler {
       } else {
         None
       }
+    }
+
+    private def portString(port: NodeIdentifierParser.Port): Option[String] = port match {
+      case PortNumber(number)     => Some(number.toString)
+      case ObfuscatedPort(string) => Some(string)
     }
 
     /**
@@ -264,12 +293,15 @@ private[server] object ForwardedHeaderHandler {
     }
 
     /**
-     * Try to parse a `ForwardedEntry` into a valid `ConnectionInfo` with an IP address
-     * and information about the protocol security. If this cannot happen, either because
-     * parsing fails or because the connection info doesn't include an IP address, this
-     * method will return `Left` with an error message.
+     * Try to parse a `ForwardedEntry` into a valid `ParsedForwardedEntry`
+     * containing the remote identity, port, protocol security, and optional
+     * fallback IP address. This method returns `Left` when the forwarded entry is
+     * missing an address or the node identifier cannot be parsed.
      */
-    def parseEntry(entry: ForwardedEntry): Either[String, ParsedForwardedEntry] = {
+    def parseEntry(
+        entry: ForwardedEntry,
+        fallbackAddress: Option[InetAddress] = None
+    ): Either[String, ParsedForwardedEntry] = {
       entry.addressString match {
         case None =>
           // We had a forwarding header, but it was missing the address entry for some reason.
@@ -277,12 +309,30 @@ private[server] object ForwardedHeaderHandler {
         case Some(addressString) =>
           nodeIdentifierParser.parseNode(addressString) match {
             case Right((Ip(address), nodePort)) =>
-              // Parsing was successful, use this connection and scan for another connection.
+              // IP identities can be checked against trustedProxies, so the caller may continue scanning.
               val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val remotePort = entry.portString.flatMap(parsePort).orElse {
                 nodePort.collect { case PortNumber(port) => port }
               }
-              val connection = ParsedForwardedEntry(address, remotePort, secure)
+              val connection =
+                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure)
+              Right(connection)
+            case Right((UnknownIp, nodePort)) =>
+              // RFC 7239 allows "unknown" when the proxy cannot or does not want to disclose the node.
+              val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
+              val connection =
+                ParsedForwardedEntry(RemoteNode.Unknown(nodePort.flatMap(portString)), fallbackAddress, None, secure)
+              Right(connection)
+            case Right((ObfuscatedIp(identifier), nodePort)) =>
+              // RFC 7239 allows obfuscated identifiers such as "_hidden" to avoid disclosing the node.
+              val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
+              val connection =
+                ParsedForwardedEntry(
+                  RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString)),
+                  fallbackAddress,
+                  None,
+                  secure
+                )
               Right(connection)
             case errorOrNonIp =>
               // The forwarding address entry couldn't be parsed for some reason.
