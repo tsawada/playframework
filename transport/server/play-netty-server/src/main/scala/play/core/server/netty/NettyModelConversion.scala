@@ -72,10 +72,10 @@ private[server] class NettyModelConversion(
     }
   }
 
-  /** Capture a request's connection info from its channel and headers. */
-  private def createRemoteConnection(channel: Channel, headers: Headers): RemoteConnection = {
+  /** Capture a request's raw connection info from its channel. */
+  private def createRawRemoteConnection(channel: Channel): RemoteConnection = {
     lazy val socketAddress = channel.remoteAddress().asInstanceOf[InetSocketAddress]
-    val rawConnection      = new RemoteConnection {
+    new RemoteConnection {
       override lazy val remoteAddress: InetAddress                           = socketAddress.getAddress
       override lazy val remotePort: Option[Int]                              = Some(socketAddress.getPort)
       private val sslHandler                                                 = Option(channel.pipeline().get(classOf[SslHandler]))
@@ -90,7 +90,6 @@ private[server] class NettyModelConversion(
         }
       }
     }
-    forwardedHeaderHandler.forwardedConnection(rawConnection, headers)
   }
 
   /** Create request target information from a Netty request. */
@@ -123,9 +122,12 @@ private[server] class NettyModelConversion(
    * later.
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val headers = new NettyHeadersWrapper(request.headers)
+    val rawConnection = createRawRemoteConnection(channel)
+    val rawHeaders    = new NettyHeadersWrapper(request.headers)
+    val forwarding    = forwardedHeaderHandler.forwardedRequest(rawConnection, rawHeaders)
+    val headers       = forwarding.host.fold[Headers](rawHeaders)(host => rawHeaders.replace(HOST -> host))
     new RequestHeaderImpl(
-      createRemoteConnection(channel, headers),
+      forwarding.connection,
       request.method.name(),
       target,
       request.protocolVersion.text(),
