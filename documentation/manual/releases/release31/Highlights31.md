@@ -44,6 +44,14 @@ This helps deployments where trusted proxy chains append to `X-Forwarded-For`, b
 
 Only enable it when the trusted edge proxy overwrites or strips any incoming client-supplied `X-Forwarded-Proto` header before setting the correct value.
 
+Play can also be configured to trust a single `X-Forwarded-Proto` value when `X-Forwarded-For` is absent:
+
+```hocon
+play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor = true
+```
+
+This setting updates the secure flag for the trusted proxy connection, but does not change the selected remote identity.
+
 ### WebSocket Compression
 
 The Play Pekko HTTP and Netty server backends now support WebSocket compression using the RFC 7692 `permessage-deflate` extension.
