@@ -518,21 +518,17 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    // This quotation handling is not RFC-compliant but we want to make sure we
-    // at least handle the case gracefully.
-    "don't unquote rfc7239 header field with one \" character" in {
+    "ignore an unterminated rfc7239 quoted value" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
-          |Forwarded: for==
+          |Forwarded: for="
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    // This quotation handling is not RFC-compliant but we want to make sure we
-    // at least handle the case gracefully.
-    "unquote and ignore rfc7239 empty quoted header field" in {
+    "ignore an empty rfc7239 quoted value" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
@@ -542,9 +538,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    // This quotation handling is not RFC-compliant but we want to make sure we
-    // at least handle the case gracefully.
-    "kind of unquote rfc7239 header field with three \" characters" in {
+    "ignore a malformed rfc7239 value with three quote characters" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
@@ -552,6 +546,16 @@ class ForwardedHeaderHandlerSpec extends Specification {
                                                     |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
+    }
+
+    "not decode quoted-pair escapes in x-forwarded headers" in {
+      remoteConnectionToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: "h\ttps"
+        """.stripMargin
+      ) mustEqual RemoteConnection("203.0.113.43", false, None)
     }
 
     "default to trusting IPv4 and IPv6 localhost with x-forwarded when there is no config" in {

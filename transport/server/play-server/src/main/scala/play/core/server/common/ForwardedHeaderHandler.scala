@@ -205,11 +205,17 @@ private[server] object ForwardedHeaderHandler {
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
+    private def stripQuotes(s: String): String = {
+      if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
+        s.substring(1, s.length - 1)
+      } else s
+    }
+
     /**
-     * Removes surrounding quotes if present and decodes quoted-pair escapes,
+     * Removes surrounding RFC 7239 quotes and decodes quoted-pair escapes,
      * otherwise returns the original string.
      */
-    private def unquote(s: String): String = {
+    private def unquoteRfc7239(s: String): String = {
       if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
         val builder = new StringBuilder(s.length - 2)
         var index   = 1
@@ -290,7 +296,7 @@ private[server] object ForwardedHeaderHandler {
             case (rawName, v) => {
               // Remove surrounding quotes
               val name  = rawName.toLowerCase(java.util.Locale.ENGLISH)
-              val value = unquote(v.tail)
+              val value = unquoteRfc7239(v.tail)
 
               Some(name -> value)
             }
@@ -303,7 +309,7 @@ private[server] object ForwardedHeaderHandler {
       }
 
       case Xforwarded =>
-        def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(unquote)
+        def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(stripQuotes)
         val forHeaders                 = h(headers, "X-Forwarded-For")
         val protoHeaders               = h(headers, "X-Forwarded-Proto")
         val portHeaders                = h(headers, "X-Forwarded-Port")
