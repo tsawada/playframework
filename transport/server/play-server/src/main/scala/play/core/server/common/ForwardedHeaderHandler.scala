@@ -407,10 +407,27 @@ private[server] object ForwardedHeaderHandler {
         case _             => throw config.reportError("version", "Forwarded header version must be either x-forwarded or rfc7239")
       }
 
+      val trustedProxyIdentifiers =
+        config.getOptional[Seq[String]]("trustedProxyIdentifiers").getOrElse(Seq.empty)
+      trustedProxyIdentifiers.foreach {
+        case identifier if identifier.equalsIgnoreCase("unknown") =>
+          throw config.reportError(
+            "trustedProxyIdentifiers",
+            "The RFC 7239 unknown identifier cannot be configured as a trusted proxy"
+          )
+        case identifier if !NodeIdentifierParser.isObfuscatedIdentifier(identifier) =>
+          throw config.reportError(
+            "trustedProxyIdentifiers",
+            s"Invalid RFC 7239 obfuscated identifier '$identifier': expected '_' followed by one or more " +
+              "ASCII letters, digits, '.', '_', or '-'"
+          )
+        case _ =>
+      }
+
       ForwardedHeaderHandlerConfig(
         version,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        config.getOptional[Seq[String]]("trustedProxyIdentifiers").getOrElse(Seq.empty).toSet,
+        trustedProxyIdentifiers.toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
         config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false)
       )
