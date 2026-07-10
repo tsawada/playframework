@@ -249,7 +249,8 @@ trait RequestHeader {
   /**
    * The HTTP host (domain, optionally port). Trusted forwarding information takes precedence when the server has
    * selected an effective host. Otherwise, this value is derived from the request target if a hostname is present,
-   * then from the `Host` header. If none of these is present, an empty string is returned.
+   * then from the `Host` header. If none of these is present, an empty string is returned. Selecting an effective host
+   * does not modify the request target exposed through [[uri]] and [[path]].
    */
   lazy val host: String = {
     import RequestHeader.AbsoluteUri
