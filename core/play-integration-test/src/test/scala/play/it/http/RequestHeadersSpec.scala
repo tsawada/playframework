@@ -11,6 +11,7 @@ import play.api.test._
 import play.api.Configuration
 import play.api.Mode
 import play.core.server.ServerConfig
+import play.filters.hosts.AllowedHostsFilter
 import play.it._
 
 class NettyRequestHeadersSpec extends RequestHeadersSpec with NettyIntegrationSpecification
@@ -289,6 +290,7 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       withServerAndConfig(
         "play.http.forwarded.version"            -> "rfc7239",
         "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[AllowedHostsFilter].getName),
         "play.filters.hosts.allowed"             -> Seq("public.example")
       )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
         val Seq(response) = BasicHttpClient.makeRequests(port)(
@@ -302,6 +304,26 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         )
         response.status must_== OK
         response.body must beLeft("public.example")
+      }
+    }
+
+    "reject a trusted forwarded host not accepted by the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"             -> Seq("localhost")
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=public.example"),
+            ""
+          )
+        )
+        response.status must_== BAD_REQUEST
       }
     }
 
