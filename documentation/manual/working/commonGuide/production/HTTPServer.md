@@ -246,6 +246,8 @@ RFC 7239 parameters are independent, so a trusted proxy can send an element cont
 
 Only rely on forwarded hosts when your trusted edge proxy overwrites or removes any incoming client-supplied `Forwarded` header before setting the correct value. Otherwise, clients may be able to spoof the request host.
 
+The [[Allowed Hosts filter|AllowedHostsFilter]] validates `RequestHeader.host`. When forwarded host handling is enabled, configure `play.filters.hosts.allowed` with the public forwarded hosts rather than only the internal proxy-facing host.
+
 ### Trusting RFC 7239 obfuscated proxy identifiers
 
 RFC 7239 allows proxies to use obfuscated identifiers, such as `_edge`, instead of IP addresses. By default, Play stops scanning the forwarded chain when it reaches an obfuscated identifier because `play.http.forwarded.trustedProxies` can only verify IP addresses and CIDR ranges.
