@@ -431,6 +431,15 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
+    "treat rfc7239 proto schemes case-insensitively" in {
+      remoteConnectionToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for=203.0.113.43;proto=HtTpS
+        """.stripMargin
+      ) mustEqual RemoteConnection("203.0.113.43", secure = true, None)
+    }
+
     "handle unquoted IPv6 addresses with rfc7239 for compatibility" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
@@ -899,6 +908,16 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |X-Forwarded-For: 203.0.113.43
         """.stripMargin
       ) mustEqual RemoteConnection("203.0.113.43", false, None)
+    }
+
+    "treat x-forwarded-proto schemes case-insensitively" in {
+      remoteConnectionToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: HtTpS
+        """.stripMargin
+      ) mustEqual RemoteConnection("203.0.113.43", secure = true, None)
     }
 
     "assume http protocol with x-forwarded when proto list is shorter than for list" in {

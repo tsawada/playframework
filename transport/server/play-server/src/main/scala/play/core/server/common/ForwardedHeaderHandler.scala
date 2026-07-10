@@ -306,6 +306,7 @@ private[server] object ForwardedHeaderHandler {
       val byNode = entry.byString.flatMap { byString =>
         parseRemoteNode(byString).toOption
       }
+      val secure = entry.protoString.exists(_.equalsIgnoreCase("https"))
 
       entry.addressString match {
         case None =>
@@ -315,7 +316,6 @@ private[server] object ForwardedHeaderHandler {
           nodeIdentifierParser.parseNode(addressString) match {
             case Right((Ip(address), nodePort)) =>
               // IP identities can be checked against trustedProxies, so the caller may continue scanning.
-              val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val remotePort = entry.portString.flatMap(parsePort).orElse {
                 nodePort.collect { case PortNumber(port) => port }
               }
@@ -324,7 +324,6 @@ private[server] object ForwardedHeaderHandler {
               Right(connection)
             case Right((UnknownIp, nodePort)) =>
               // RFC 7239 allows "unknown" when the proxy cannot or does not want to disclose the node.
-              val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val connection =
                 ParsedForwardedEntry(
                   RemoteNode.Unknown(nodePort.flatMap(portString)),
@@ -336,7 +335,6 @@ private[server] object ForwardedHeaderHandler {
               Right(connection)
             case Right((ObfuscatedIp(identifier), nodePort)) =>
               // RFC 7239 allows obfuscated identifiers such as "_hidden" to avoid disclosing the node.
-              val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val connection =
                 ParsedForwardedEntry(
                   RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString)),
