@@ -72,6 +72,24 @@ For compatibility with Play 3.0, Play continues to accept these values without q
 
 When Play encounters a malformed `Forwarded` field while scanning a trusted proxy chain, it stops at that field and keeps the last verified connection information. Check that each trusted proxy emits valid RFC 7239 syntax before upgrading.
 
+### Redirect HTTPS filter only reads X-Forwarded-Proto when enabled
+
+The Redirect HTTPS filter previously treated `X-Forwarded-Proto: https` as a secure request even when `play.filters.https.xForwardedProtoEnabled` was `false`. The filter now ignores `X-Forwarded-Proto` unless that legacy option is explicitly enabled. Deployments that relied on this implicit header handling may otherwise repeatedly redirect a public HTTPS request when a proxy terminates HTTPS but Play still sees the proxy connection as insecure.
+
+Applications behind a trusted proxy should normally configure [[trusted proxies|HTTPServer#configuring-trusted-proxies]] so Play derives `request.secure` after validating the forwarded proxy chain. If a trusted proxy sends a single `X-Forwarded-Proto` value without `X-Forwarded-For`, enable:
+
+```hocon
+play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor = true
+```
+
+The immediate proxy must also be included in `play.http.forwarded.trustedProxies`. Applications that intentionally rely on the filter reading `X-Forwarded-Proto` directly can instead set:
+
+```hocon
+play.filters.https.xForwardedProtoEnabled = true
+```
+
+This legacy option changes more than the secure-request check: the filter redirects only requests with `X-Forwarded-Proto: http`. Requests with a missing or unexpected value are passed to the application without an HTTPS redirect or HSTS header, and the option does not update `request.secure`. Only enable it when bypassing redirects for requests without the header is intentional, or when a trusted proxy removes or overwrites every client-supplied value and reliably sends either `http` or `https`.
+
 ### HEAD responses no longer include generated Content-Length headers
 
 Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.

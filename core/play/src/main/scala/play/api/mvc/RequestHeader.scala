@@ -263,9 +263,30 @@ trait RequestHeader {
   }
 
   /**
-   * The HTTP domain. The domain part of the request's [[host]].
+   * The HTTP domain. This is the request's [[host]] without its port. Brackets
+   * around an IPv6 address are preserved so the result can be used in a URI.
    */
-  lazy val domain: String = host.split(':').head
+  lazy val domain: String = {
+    val hostValue = host
+    if (hostValue.startsWith("[")) {
+      val closingBracket = hostValue.indexOf(']')
+      if (
+        closingBracket >= 0 &&
+        (closingBracket == hostValue.length - 1 || hostValue.charAt(closingBracket + 1) == ':')
+      ) {
+        hostValue.substring(0, closingBracket + 1)
+      } else {
+        hostValue
+      }
+    } else {
+      val portSeparator = hostValue.indexOf(':')
+      if (portSeparator >= 0 && hostValue.indexOf(':', portSeparator + 1) < 0) {
+        hostValue.substring(0, portSeparator)
+      } else {
+        hostValue
+      }
+    }
+  }
 
   /**
    * The Request Langs extracted from the Accept-Language header and sorted by preference (preferred first).
