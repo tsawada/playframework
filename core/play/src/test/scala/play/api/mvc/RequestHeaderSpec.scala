@@ -185,6 +185,15 @@ class RequestHeaderSpec extends Specification {
         val rh = dummyRequestHeader("GET", "https://example.com/test", Headers(HOST -> "playframework.com"))
         rh.host must_== "example.com"
       }
+      "trusted effective host with absolute uri" in {
+        val rh = dummyRequestHeader(
+          "GET",
+          "https://internal.example/test",
+          Headers(HOST                          -> "public.example"),
+          TypedMap(RequestAttrKey.EffectiveHost -> "public.example")
+        )
+        rh.host must_== "public.example"
+      }
       "absolute uri with port" in {
         val rh = dummyRequestHeader("GET", "https://example.com:8080/test", Headers(HOST -> "playframework.com"))
         rh.host must_== "example.com:8080"

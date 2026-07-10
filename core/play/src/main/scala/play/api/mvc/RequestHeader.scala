@@ -247,15 +247,17 @@ trait RequestHeader {
   def hasBody: Boolean = headers.hasBody
 
   /**
-   * The HTTP host (domain, optionally port). This value is derived from the request target, if a hostname is present.
-   * If the target doesn't have a host then the `Host` header is used, if present. If that's not present then an
-   * empty string is returned.
+   * The HTTP host (domain, optionally port). Trusted forwarding information takes precedence when the server has
+   * selected an effective host. Otherwise, this value is derived from the request target if a hostname is present,
+   * then from the `Host` header. If none of these is present, an empty string is returned.
    */
   lazy val host: String = {
     import RequestHeader.AbsoluteUri
-    uri match {
-      case AbsoluteUri(proto, hostPort, rest) => hostPort
-      case _                                  => headers.get(HeaderNames.HOST).getOrElse("")
+    attrs.get(RequestAttrKey.EffectiveHost).getOrElse {
+      uri match {
+        case AbsoluteUri(proto, hostPort, rest) => hostPort
+        case _                                  => headers.get(HeaderNames.HOST).getOrElse("")
+      }
     }
   }
 

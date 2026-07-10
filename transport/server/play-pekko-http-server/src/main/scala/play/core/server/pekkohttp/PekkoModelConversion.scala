@@ -106,6 +106,11 @@ private[server] class PekkoModelConversion(
     }
     val forwarding       = forwardedHeaderHandler.forwardedRequest(rawConnection, headers)
     val forwardedHeaders = forwarding.host.fold(headers)(host => headers.replace(HeaderNames.HOST -> host))
+    val attrs            = TypedMap(
+      // This is the earliest stage of a Play request at which we can set an id.
+      RequestAttrKey.Id -> RequestIdProvider.freshId(),
+    )
+    val effectiveAttrs = forwarding.host.fold(attrs)(host => attrs.updated(RequestAttrKey.EffectiveHost, host))
 
     new RequestHeaderImpl(
       forwarding.connection,
@@ -113,10 +118,7 @@ private[server] class PekkoModelConversion(
       requestTarget,
       request.protocol.value,
       forwardedHeaders,
-      TypedMap(
-        // This is the earliest stage of a Play request at which we can set an id.
-        RequestAttrKey.Id -> RequestIdProvider.freshId(),
-      )
+      effectiveAttrs
     )
   }
 
