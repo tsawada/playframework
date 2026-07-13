@@ -571,36 +571,6 @@ object BuildSettings {
       ProblemFilters.exclude[IncompatibleMethTypeProblem](
         "org.apache.pekko.http.play.WebSocketHandler.handleWebSocket"
       ),
-      // ForwardedEntry and ParsedForwardedEntry are private server internals.
-      // Their case class signatures changed to carry forwarded port values.
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedEntry.apply"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedEntry.copy"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedEntry.this"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.apply"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.copy"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.this"
-      ),
-      ProblemFilters.exclude[IncompatibleResultTypeProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry.copy$default$2"
-      ),
-      ProblemFilters.exclude[IncompatibleResultTypeProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry._2"
-      ),
-      ProblemFilters.exclude[MissingTypesProblem]("play.core.server.common.ForwardedHeaderHandler$ForwardedEntry$"),
-      ProblemFilters.exclude[MissingTypesProblem](
-        "play.core.server.common.ForwardedHeaderHandler$ParsedForwardedEntry$"
-      ),
     ),
     (Compile / unmanagedSourceDirectories) += {
       val suffix = CrossVersion.partialVersion(scalaVersion.value) match {

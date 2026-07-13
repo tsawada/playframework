@@ -14,7 +14,6 @@ import play.api.mvc.Headers
 import play.api.Configuration
 import play.api.Logger
 import play.core.server.common.NodeIdentifierParser.Ip
-import play.core.server.common.NodeIdentifierParser.PortNumber
 import ForwardedHeaderHandler._
 
 /**
@@ -34,18 +33,14 @@ import ForwardedHeaderHandler._
  * 5. If the immediate connection *is not* a trusted proxy, then return the
  *    immediate connection info and don't do any further processing.
  *
- * Each address is associated with a port and a secure or insecure protocol by
- * pairing it with a `port` and `proto` entry in the headers. If the `proto`
- * entry is missing, or if `proto` entries can't be matched with addresses,
- * then the default is insecure.
+ * Each address is associated with a secure or insecure protocol by pairing
+ * it with a `proto` entry in the headers. If the `proto` entry is missing, or if
+ * `proto` entries can't be matched with addresses, then the default is insecure.
  * When `play.http.forwarded.trustSingleXForwardedProto` is enabled, a lone
  * `X-Forwarded-Proto` entry is associated with the client address instead of
  * being discarded.
- * When `play.http.forwarded.trustSingleXForwardedPort` is enabled, a lone
- * `X-Forwarded-Port` entry is associated with the client address instead of
- * being discarded.
  *
- * It is configured by these configuration options:
+ * It is configured by two configuration options:
  * <dl>
  *   <dt>play.http.forwarded.version</dt>
  *   <dd>
@@ -108,7 +103,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                 scan(
                   RemoteConnection(
                     parsedEntry.address,
-                    parsedEntry.remotePort,
+                    None,
                     parsedEntry.secure,
                     None /* No cert chain for forward headers */
                   )
@@ -145,29 +140,20 @@ private[server] object ForwardedHeaderHandler {
   type HeaderParser = Headers => Seq[ForwardedEntry]
 
   /**
-   * An unparsed address, protocol, and port from a forwarded header. Each value is
+   * An unparsed address and protocol pair from a forwarded header. Both values are
    * optional.
    */
-  final case class ForwardedEntry(
-      addressString: Option[String],
-      protoString: Option[String],
-      portString: Option[String] = None
-  )
+  final case class ForwardedEntry(addressString: Option[String], protoString: Option[String])
 
   /**
    * Basic information about an HTTP connection, parsed from a ForwardedEntry.
    */
-  final case class ParsedForwardedEntry(
-      address: InetAddress,
-      remotePort: Option[Int],
-      secure: Boolean
-  )
+  final case class ParsedForwardedEntry(address: InetAddress, secure: Boolean)
 
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
       trustedProxies: List[Subnet],
-      trustSingleXForwardedProto: Boolean = false,
-      trustSingleXForwardedPort: Boolean = false
+      trustSingleXForwardedProto: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -179,16 +165,6 @@ private[server] object ForwardedHeaderHandler {
       if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
         s.substring(1, s.length - 1)
       } else s
-    }
-
-    private def parsePort(s: String): Option[Int] = {
-      if (s.matches("\\d{1,5}")) {
-        val port = s.toInt
-        // Port numbers are 16-bit unsigned values.
-        Option.when(port <= 65535)(port)
-      } else {
-        None
-      }
     }
 
     /**
@@ -226,40 +202,25 @@ private[server] object ForwardedHeaderHandler {
         def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(unquote)
         val forHeaders                 = h(headers, "X-Forwarded-For")
         val protoHeaders               = h(headers, "X-Forwarded-Proto")
-        val portHeaders                = h(headers, "X-Forwarded-Port")
-
-        def protoForIndex(index: Int): Option[String] = {
-          if (forHeaders.length == protoHeaders.length) {
-            protoHeaders.lift(index)
-          } else if (
-            trustSingleXForwardedProto &&
-            forHeaders.nonEmpty &&
-            protoHeaders.length == 1 &&
-            index == 0
-          ) {
-            protoHeaders.headOption
-          } else {
-            None
+        if (forHeaders.length == protoHeaders.length) {
+          forHeaders.lazyZip(protoHeaders).map { (f, p) =>
+            ForwardedEntry(Some(f), Some(p))
           }
-        }
-
-        def portForIndex(index: Int): Option[String] = {
-          if (forHeaders.length == portHeaders.length) {
-            portHeaders.lift(index)
-          } else if (
-            trustSingleXForwardedPort &&
-            forHeaders.nonEmpty &&
-            portHeaders.length == 1 &&
-            index == 0
-          ) {
-            portHeaders.headOption
-          } else {
-            None
+        } else if (trustSingleXForwardedProto && forHeaders.nonEmpty && protoHeaders.length == 1) {
+          // A single X-Forwarded-Proto entry describes the protocol the client used to reach
+          // the outermost proxy. Associate it with the client (the first X-Forwarded-For
+          // entry); the remaining entries are left without a protocol.
+          forHeaders.zipWithIndex.map {
+            case (f, 0) => ForwardedEntry(Some(f), protoHeaders.headOption)
+            case (f, _) => ForwardedEntry(Some(f), None)
           }
-        }
-
-        forHeaders.zipWithIndex.map {
-          case (f, index) => ForwardedEntry(Some(f), protoForIndex(index), portForIndex(index))
+        } else {
+          // If the lengths vary, then discard the protoHeaders because we can't tell which
+          // proto matches which header. The connections will all appear to be insecure by
+          // default.
+          forHeaders.map {
+            case f => ForwardedEntry(Some(f), None)
+          }
         }
     }
 
@@ -276,13 +237,10 @@ private[server] object ForwardedHeaderHandler {
           Left("No address")
         case Some(addressString) =>
           nodeIdentifierParser.parseNode(addressString) match {
-            case Right((Ip(address), nodePort)) =>
+            case Right((Ip(address), _)) =>
               // Parsing was successful, use this connection and scan for another connection.
               val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
-              val remotePort = entry.portString.flatMap(parsePort).orElse {
-                nodePort.collect { case PortNumber(port) => port }
-              }
-              val connection = ParsedForwardedEntry(address, remotePort, secure)
+              val connection = ParsedForwardedEntry(address, secure)
               Right(connection)
             case errorOrNonIp =>
               // The forwarding address entry couldn't be parsed for some reason.
@@ -313,8 +271,7 @@ private[server] object ForwardedHeaderHandler {
       ForwardedHeaderHandlerConfig(
         version,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
-        config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false)
+        config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false)
       )
     }
   }

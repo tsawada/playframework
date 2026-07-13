@@ -40,28 +40,28 @@ class ForwardedHeaderHandlerSpec extends Specification {
       results(0)._2 must beLeft
       results(0)._3 must beNone
       results(1)._1 must_== ForwardedEntry(Some("[2001:db8:cafe::17]:4711"), None)
-      results(1)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), Some(4711), false))
+      results(1)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), false))
       results(1)._3 must beSome(false)
       results(2)._1 must_== ForwardedEntry(Some("192.0.2.60"), Some("http"))
-      results(2)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.60"), None, false))
+      results(2)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.60"), false))
       results(2)._3 must beSome(true)
       results(3)._1 must_== ForwardedEntry(Some("192.0.2.43"), None)
-      results(3)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.43"), None, false))
+      results(3)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.43"), false))
       results(3)._3 must beSome(true)
       results(4)._1 must_== ForwardedEntry(Some("198.51.100.17"), None)
-      results(4)._2 must beRight(ParsedForwardedEntry(addr("198.51.100.17"), None, false))
+      results(4)._2 must beRight(ParsedForwardedEntry(addr("198.51.100.17"), false))
       results(4)._3 must beSome(false)
       results(5)._1 must_== ForwardedEntry(Some("127.0.0.1"), None)
-      results(5)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), None, false))
+      results(5)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), false))
       results(5)._3 must beSome(false)
       results(6)._1 must_== ForwardedEntry(Some("192.0.2.61"), Some("https"))
-      results(6)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.61"), None, true))
+      results(6)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.61"), true))
       results(6)._3 must beSome(true)
       results(7)._1 must_== ForwardedEntry(Some("unknown"), None)
       results(7)._2 must beLeft
       results(7)._3 must beNone
       results(8)._1 must_== ForwardedEntry(Some("[::ffff:192.168.0.9]"), Some("https"))
-      results(8)._2 must beRight(ParsedForwardedEntry(addr("::ffff:192.168.0.9"), None, true))
+      results(8)._2 must beRight(ParsedForwardedEntry(addr("::ffff:192.168.0.9"), true))
       results(8)._3 must beSome(false)
     }
 
@@ -77,19 +77,19 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
       results.length must_== 5
       results(0)._1 must_== ForwardedEntry(Some("192.168.1.1"), Some("https"))
-      results(0)._2 must beRight(ParsedForwardedEntry(addr("192.168.1.1"), None, true))
+      results(0)._2 must beRight(ParsedForwardedEntry(addr("192.168.1.1"), true))
       results(0)._3 must beSome(false)
       results(1)._1 must_== ForwardedEntry(Some("::1"), Some("http"))
-      results(1)._2 must beRight(ParsedForwardedEntry(addr("::1"), None, false))
+      results(1)._2 must beRight(ParsedForwardedEntry(addr("::1"), false))
       results(1)._3 must beSome(false)
       results(2)._1 must_== ForwardedEntry(Some("[2001:db8:cafe::17]"), Some("https"))
-      results(2)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), None, true))
+      results(2)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), true))
       results(2)._3 must beSome(true)
       results(3)._1 must_== ForwardedEntry(Some("127.0.0.1"), Some("http"))
-      results(3)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), None, false))
+      results(3)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), false))
       results(3)._3 must beSome(false)
       results(4)._1 must_== ForwardedEntry(Some("::ffff:123.123.123.123"), Some("https"))
-      results(4)._2 must beRight(ParsedForwardedEntry(addr("::ffff:123.123.123.123"), None, true))
+      results(4)._2 must beRight(ParsedForwardedEntry(addr("::ffff:123.123.123.123"), true))
       results(4)._3 must beSome(false)
     }
 
@@ -180,7 +180,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
         """
           |Forwarded: For=[2001:db8:cafe::17]:4711
         """.stripMargin
-      ) mustEqual RemoteConnection("2001:db8:cafe::17", Some(4711), secure = false, None)
+      ) mustEqual RemoteConnection("2001:db8:cafe::17", false, None)
     }
 
     "handle quoted IPv6 addresses with rfc7239" in {
@@ -189,7 +189,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
         """
           |Forwarded: For="[2001:db8:cafe::17]:4711"
         """.stripMargin
-      ) mustEqual RemoteConnection("2001:db8:cafe::17", Some(4711), secure = false, None)
+      ) mustEqual RemoteConnection("2001:db8:cafe::17", false, None)
     }
 
     "handle quoted IPv4-mapped IPv6 addresses with rfc7239" in {
@@ -200,7 +200,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
                     |Forwarded: For="[::ffff:99.99.99.99]:4711"
                     |Forwarded: For="[::ffff:123.123.123.123]"
         """.stripMargin)
-        ) mustEqual RemoteConnection(addr("::ffff:99.99.99.99"), Some(4711), secure = false, None)
+        ) mustEqual RemoteConnection(addr("::ffff:99.99.99.99"), false, None)
     }
 
     "ignore obfuscated addresses with rfc7239" in {
@@ -213,30 +213,11 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    "ignore obfuscated ports with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for="192.0.2.43:_hidden"
-        """.stripMargin
-      ) mustEqual RemoteConnection("192.0.2.43", false, None)
-    }
-
     "ignore unknown addresses with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
           |Forwarded: for=unknown
-          |Forwarded: for=192.168.1.10, for=127.0.0.1
-        """.stripMargin
-      ) mustEqual RemoteConnection("192.168.1.10", false, None)
-    }
-
-    "ignore unknown addresses with ports with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |Forwarded: for=unknown:1234
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
@@ -343,152 +324,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |X-Forwarded-For: 192.0.2.43
         """.stripMargin
       ) mustEqual RemoteConnection("192.0.2.43", false, None)
-    }
-
-    "use the port from an rfc7239 forwarded IPv4 address" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for="192.0.2.43:443";proto=https
-        """.stripMargin
-      ) mustEqual RemoteConnection("192.0.2.43", Some(443), secure = true, None)
-    }
-
-    "use the port from an rfc7239 forwarded IPv6 address" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for="[2001:db8:cafe::17]:443";proto=https
-        """.stripMargin
-      ) mustEqual RemoteConnection("2001:db8:cafe::17", Some(443), secure = true, None)
-    }
-
-    "use the port from the first untrusted rfc7239 forwarded address" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |Forwarded: for="203.0.113.43:443"
-          |Forwarded: for="192.168.1.43:9000"
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "use x-forwarded-port when it matches a single x-forwarded-for address" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Port: 443
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "accept the maximum x-forwarded-port value" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Port: 65535
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(65535), secure = false, None)
-    }
-
-    "ignore x-forwarded-port values above the maximum port value" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Port: 65536
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "use the port from an x-forwarded-for address" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43:443
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "prefer x-forwarded-port over the port in an x-forwarded-for address" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43:80
-          |X-Forwarded-Port: 443
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "pair x-forwarded-port entries with x-forwarded-for entries" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
-          |X-Forwarded-Port: 443, 9000
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "ignore a single x-forwarded-port with multiple x-forwarded-for entries by default" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
-          |X-Forwarded-Port: 443
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "associate a single x-forwarded-port with the client when trustSingleXForwardedPort is enabled" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleXForwardedPort(true),
-        """
-          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
-          |X-Forwarded-Port: 443
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", Some(443), secure = false, None)
-    }
-
-    "ignore multiple x-forwarded-port entries shorter than x-forwarded-for" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleXForwardedPort(true),
-        """
-          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
-          |X-Forwarded-Port: 443, 9000
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "ignore x-forwarded-port when x-forwarded-for is missing" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustSingleXForwardedPort(true),
-        """
-          |X-Forwarded-Port: 443
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, false, None)
-    }
-
-    "ignore invalid x-forwarded-port values" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Port: 70000
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "ignore non-numeric x-forwarded-port values" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Port: abc
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
     }
 
     "trust IPv4 and IPv6 localhost with x-forwarded when there is config with default settings" in {
@@ -762,10 +597,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def trustSingleXForwardedProto(b: Boolean) = {
     Map("play.http.forwarded.trustSingleXForwardedProto" -> b)
-  }
-
-  def trustSingleXForwardedPort(b: Boolean) = {
-    Map("play.http.forwarded.trustSingleXForwardedPort" -> b)
   }
 
   def headers(s: String): Headers = {

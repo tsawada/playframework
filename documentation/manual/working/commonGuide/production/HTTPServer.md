@@ -158,7 +158,7 @@ ProxyPassReverse / http://localhost:9998
 
 ## Configuring trusted proxies
 
-Play supports various forwarded headers used by proxies to indicate the incoming IP address, port, and protocol of requests. Play uses this configuration to calculate the correct value for the `remoteAddress`, `remotePort`, and `secure` fields of `RequestHeader`.
+Play supports various forwarded headers used by proxies to indicate the incoming IP address and protocol of requests. Play uses this configuration to calculate the correct value for the `remoteAddress` and `secure` fields of `RequestHeader`. `RequestHeader.remotePort` exposes the remote port when Play knows it, but forwarded port headers are not currently parsed.
 
 It is trivial for an HTTP client, whether it's a browser or other client, to forge forwarded headers, thereby spoofing the IP address and protocol that Play reports, consequently, Play needs to know which proxies are trusted. Play provides a configuration option to configure a list of trusted proxies, and will validate the incoming forwarded headers to verify that they are trusted, taking the first untrusted IP address that it finds as the reported user remote address (or the last IP address if all proxies are trusted.)
 
@@ -187,7 +187,7 @@ Play supports two different versions of forwarded headers:
 
 This is configured using `play.http.forwarded.version`, with valid values being `x-forwarded` or `rfc7239`. The default is `x-forwarded`.
 
-`x-forwarded` uses the de facto standard `X-Forwarded-For`, `X-Forwarded-Port`, and `X-Forwarded-Proto` headers to determine the correct remote address, port, and protocol for the request. These headers are widely used, however, they have some serious limitations, for example, if you have multiple proxies, and only one of them adds the `X-Forwarded-Proto` header, it's impossible to reliably determine which proxy added it and therefore whether the request from the client was made using https or http. `rfc7239` uses the new `Forwarded` header standard, and solves many of the limitations of the `X-Forwarded-*` headers.
+`x-forwarded` uses the de facto standard `X-Forwarded-For` and `X-Forwarded-Proto` headers to determine the correct remote address and protocol for the request. These headers are widely used, however, they have some serious limitations, for example, if you have multiple proxies, and only one of them adds the `X-Forwarded-Proto` header, it's impossible to reliably determine which proxy added it and therefore whether the request from the client was made using https or http. `rfc7239` uses the new `Forwarded` header standard, and solves many of the limitations of the `X-Forwarded-*` headers.
 
 For more information, please read the [RFC 7239](https://tools.ietf.org/html/rfc7239) specification.
 
@@ -204,19 +204,3 @@ play.http.forwarded.trustSingleXForwardedProto = true
 This setting only applies when `play.http.forwarded.version = "x-forwarded"`. It associates a single `X-Forwarded-Proto` value with the client address from `X-Forwarded-For`. It does not apply to RFC 7239 `Forwarded` headers, and it does not use `X-Forwarded-Proto` when `X-Forwarded-For` is absent.
 
 Only enable this when your trusted edge proxy overwrites or removes any incoming client-supplied `X-Forwarded-Proto` header before setting the correct value. Otherwise, clients may be able to spoof whether a request was secure.
-
-### Trusting a single X-Forwarded-Port value
-
-Play uses `X-Forwarded-Port` when it can match port values to `X-Forwarded-For` addresses. A single `X-Forwarded-Port` value is used automatically when there is a single `X-Forwarded-For` address. Multiple port values are paired with forwarded addresses by position when both headers contain the same number of values.
-
-Some proxy chains append to `X-Forwarded-For`, but set a single `X-Forwarded-Port` value. In that case, Play cannot normally match each forwarded address to a port value, so it discards the port information.
-
-If your trusted edge proxy is known to set `X-Forwarded-Port` to the port used by the original client request, you can enable:
-
-```
-play.http.forwarded.trustSingleXForwardedPort = true
-```
-
-This setting only applies when `play.http.forwarded.version = "x-forwarded"`. It associates a single `X-Forwarded-Port` value with the client address from `X-Forwarded-For`. It does not apply to RFC 7239 `Forwarded` headers, where the port is part of the `for` value, and it does not use `X-Forwarded-Port` when `X-Forwarded-For` is absent.
-
-Only enable this when your trusted edge proxy overwrites or removes any incoming client-supplied `X-Forwarded-Port` header before setting the correct value. Otherwise, clients may be able to spoof the forwarded port.
