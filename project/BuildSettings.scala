@@ -316,7 +316,7 @@ object BuildSettings {
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.filters.https.RedirectHttpsConfiguration.copy"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.filters.https.RedirectHttpsConfiguration.this"),
       ProblemFilters.exclude[MissingTypesProblem]("play.filters.https.RedirectHttpsConfiguration$"),
-      // ForwardedHeaderHandlerConfig is a private server-internal configuration model.
+      // Add trustSingleXForwardedProto to ForwardedHeaderHandlerConfig
       ProblemFilters.exclude[DirectMissingMethodProblem](
         "play.core.server.common.ForwardedHeaderHandler#ForwardedHeaderHandlerConfig.apply"
       ),

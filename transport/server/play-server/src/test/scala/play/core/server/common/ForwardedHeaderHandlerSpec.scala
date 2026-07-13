@@ -246,64 +246,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
-    "not reuse proto from a trusted obfuscated proxy for the client with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("192.168.1.1/24", "127.0.0.1") ++
-          trustedProxyIdentifiers("_edge"),
-        """
-          |Forwarded: for=203.0.113.43
-          |Forwarded: for="_edge";proto=http
-          |Forwarded: for=192.168.1.10
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "continue scanning through trusted obfuscated identifiers with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("192.168.1.1/24", "127.0.0.1") ++
-          trustedProxyIdentifiers("_edge"),
-        """
-          |Forwarded: for=203.0.113.43;proto=https
-          |Forwarded: for="_edge";proto=http
-          |Forwarded: for=192.168.1.10
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", true, None)
-    }
-
-    "match trusted obfuscated identifiers exactly with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("192.168.1.1/24", "127.0.0.1") ++
-          trustedProxyIdentifiers("_edge"),
-        """
-          |Forwarded: for=203.0.113.43;proto=https
-          |Forwarded: for="_edge2";proto=http
-          |Forwarded: for=192.168.1.10
-        """.stripMargin
-      ) mustEqual RemoteConnection(
-        addr("192.168.1.10"),
-        RemoteNode.Obfuscated("_edge2", None),
-        None,
-        secure = false,
-        None
-      )
-    }
-
-    "not trust unknown identifiers with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("192.168.1.1/24", "127.0.0.1") ++
-          trustedProxyIdentifiers("unknown"),
-        """
-          |Forwarded: for=203.0.113.43;proto=https
-          |Forwarded: for=unknown;proto=http
-          |Forwarded: for=192.168.1.10
-        """.stripMargin
-      ) mustEqual RemoteConnection(addr("192.168.1.10"), RemoteNode.Unknown(None), None, secure = false, None)
-    }
-
     "ignore obfuscated ports with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
@@ -866,10 +808,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def trustSingleXForwardedPort(b: Boolean) = {
     Map("play.http.forwarded.trustSingleXForwardedPort" -> b)
-  }
-
-  def trustedProxyIdentifiers(s: String*) = {
-    Map("play.http.forwarded.trustedProxyIdentifiers" -> s)
   }
 
   def headers(s: String): Headers = {

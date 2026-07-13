@@ -32,11 +32,11 @@ import ForwardedHeaderHandler._
  *    that connection and don't do any further processing.
  * 3. If the proxy *did* send a valid header then work out whether we trust it by
  *    checking whether the immediate connection is in our list of trusted
- *    proxies or trusted RFC 7239 obfuscated proxy identifiers.
+ *    proxies.
  * 4. If the immediate connection *is* a trusted proxy, then resume at step
  *    1 using the connection info in the forwarded header. If the forwarded
  *    identity is not an IP address, keep it as the selected remote identity
- *    and stop scanning unless it is an explicitly trusted obfuscated identifier.
+ *    and stop scanning because trusted proxies are configured as IP ranges.
  * 5. If the immediate connection *is not* a trusted proxy, then return the
  *    immediate connection info and don't do any further processing.
  *
@@ -65,11 +65,6 @@ import ForwardedHeaderHandler._
  *     A list of proxies that are ignored when getting the remote identity, remote address, or remote port.
  *     It can have optionally an address block size. When the address block size is set,
  *     all IP-addresses in the range of the subnet will be treated as trusted.
- *   </dd>
- *   <dt>play.http.forwarded.trustedProxyIdentifiers</dt>
- *   <dd>
- *     A list of RFC 7239 obfuscated proxy identifiers that are ignored when getting the
- *     remote identity. This only applies when using <code>rfc7239</code>.
  *   </dd>
  * </dl>
  */
@@ -108,11 +103,11 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
           // There is a forwarded header from 'prev', so lets check if 'prev' is trusted.
           // If it's a trusted proxy then process the header, otherwise just use 'prev'.
 
-          val previousFallbackAddress = configuration.trustedProxyFallbackAddress(prev)
-          if (previousFallbackAddress.isDefined) {
+          val previousAddress = prev.remoteIpAddress
+          if (previousAddress.exists(configuration.isTrustedProxy)) {
             // 'prev' is a trusted proxy, so we process the next entry.
             val entry = headerEntries.next()
-            configuration.parseEntry(entry, previousFallbackAddress) match {
+            configuration.parseEntry(entry, previousAddress) match {
               case Left(error) =>
                 ForwardedHeaderHandler.logger.debug(
                   s"Error with info in forwarding header $entry, using $prev instead: $error."
@@ -126,7 +121,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                   parsedEntry.secure,
                   None /* No cert chain for forward headers */
                 )
-                if (configuration.canContinueScanning(parsedEntry.remoteNode)) {
+                if (parsedEntry.remoteIpAddress.isDefined) {
                   scan(connection)
                 } else {
                   connection
@@ -195,7 +190,6 @@ private[server] object ForwardedHeaderHandler {
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
       trustedProxies: List[Subnet],
-      trustedProxyIdentifiers: Set[String] = Set.empty,
       trustSingleXForwardedProto: Boolean = false,
       trustSingleXForwardedPort: Boolean = false
   ) {
@@ -354,32 +348,6 @@ private[server] object ForwardedHeaderHandler {
     def isTrustedProxy(address: InetAddress): Boolean = {
       trustedProxies.exists(_.isInRange(address))
     }
-
-    /**
-     * Return the fallback IP address to use when this connection is a trusted proxy.
-     */
-    def trustedProxyFallbackAddress(connection: RemoteConnection): Option[InetAddress] = connection.remoteNode match {
-      case RemoteNode.Ip(address, _) if isTrustedProxy(address)                         => Some(address)
-      case RemoteNode.Obfuscated(identifier, _) if isTrustedProxyIdentifier(identifier) =>
-        Some(connection.remoteAddress)
-      case _ => None
-    }
-
-    /**
-     * Check if a forwarded node can be evaluated for trust in the next scan step.
-     */
-    def canContinueScanning(remoteNode: RemoteNode): Boolean = remoteNode match {
-      case RemoteNode.Ip(_, _)                  => true
-      case RemoteNode.Obfuscated(identifier, _) => isTrustedProxyIdentifier(identifier)
-      case RemoteNode.Unknown(_)                => false
-    }
-
-    /**
-     * Check if an RFC 7239 obfuscated identifier is considered to be a trusted proxy.
-     */
-    def isTrustedProxyIdentifier(identifier: String): Boolean = {
-      version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
-    }
   }
 
   object ForwardedHeaderHandlerConfig {
@@ -395,7 +363,6 @@ private[server] object ForwardedHeaderHandler {
       ForwardedHeaderHandlerConfig(
         version,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        config.getOptional[Seq[String]]("trustedProxyIdentifiers").getOrElse(Seq.empty).toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
         config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false)
       )
