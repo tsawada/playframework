@@ -185,30 +185,6 @@ class RequestHeaderSpec extends Specification {
         val rh = dummyRequestHeader("GET", "https://example.com/test", Headers(HOST -> "playframework.com"))
         rh.host must_== "example.com"
       }
-      "trusted effective host with absolute uri for Scala and Java requests" in {
-        val requestHeader = dummyRequestHeader(
-          requestMethod = "GET",
-          requestUri = "https://internal.example/test",
-          headers = Headers(HOST -> "public.example"),
-          attrs = TypedMap(RequestAttrKey.EffectiveHost -> "public.example"),
-          requestPath = "/test"
-        )
-        val request = requestHeader.withBody("body")
-
-        requestHeader.host must_== "public.example"
-        request.host must_== "public.example"
-        requestHeader.asJava.host must_== "public.example"
-        request.asJava.host must_== "public.example"
-
-        requestHeader.uri must_== "https://internal.example/test"
-        requestHeader.path must_== "/test"
-        request.uri must_== "https://internal.example/test"
-        request.path must_== "/test"
-        requestHeader.asJava.uri must_== "https://internal.example/test"
-        requestHeader.asJava.path must_== "/test"
-        request.asJava.uri must_== "https://internal.example/test"
-        request.asJava.path must_== "/test"
-      }
       "absolute uri with port" in {
         val rh = dummyRequestHeader("GET", "https://example.com:8080/test", Headers(HOST -> "playframework.com"))
         rh.host must_== "example.com:8080"
@@ -283,13 +259,12 @@ class RequestHeaderSpec extends Specification {
       requestUri: String = "/",
       headers: Headers = Headers(),
       attrs: TypedMap = TypedMap.empty,
-      remotePort: Option[Int] = None,
-      requestPath: String = ""
+      remotePort: Option[Int] = None
   ): RequestHeader = {
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       connection = RemoteConnection("127.0.0.1", remotePort, false, None),
       method = requestMethod,
-      target = RequestTarget(requestUri, requestPath, Map.empty),
+      target = RequestTarget(requestUri, "", Map.empty),
       version = "",
       headers = headers,
       attrs = attrs

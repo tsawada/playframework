@@ -158,7 +158,7 @@ ProxyPassReverse / http://localhost:9998
 
 ## Configuring trusted proxies
 
-Play supports various forwarded headers used by proxies to indicate the incoming remote identity, IP address, receiving proxy node, port, protocol, and host of requests. Play uses this configuration to calculate the correct value for the `remoteNode`, `remoteIdentity`, `remoteIpAddress`, `byNode`, `remotePort`, and `secure` fields of `RequestHeader.connection`. When explicitly enabled, Play can also use a trusted RFC 7239 `host` parameter for `RequestHeader.host`.
+Play supports various forwarded headers used by proxies to indicate the incoming remote identity, IP address, receiving proxy node, port, and protocol of requests. Play uses this configuration to calculate the correct value for the `remoteNode`, `remoteIdentity`, `remoteIpAddress`, `byNode`, `remotePort`, and `secure` fields of `RequestHeader.connection`.
 
 It is trivial for an HTTP client, whether it's a browser or other client, to forge forwarded headers, thereby spoofing the remote identity and protocol that Play reports. Consequently, Play needs to know which proxies are trusted. Play provides configuration options to configure trusted proxies, and will validate the incoming forwarded headers to verify that they are trusted, taking the first untrusted remote identity that it finds as the reported user remote identity (or the first identity if all proxies are trusted.)
 
@@ -215,38 +215,6 @@ Use `RequestHeader.connection.remoteIdentity` when you need the selected remote 
 When an RFC 7239 `Forwarded` element contains a `by` parameter, Play exposes it through `RequestHeader.connection.byNode`. This identifies the proxy interface that received the request represented by `remoteNode`; it is not the selected remote client identity.
 
 If Play selects an `unknown` or untrusted obfuscated remote node while scanning a trusted proxy chain, it stops scanning at that node because it cannot determine whether the non-IP identifier represents a trusted proxy.
-
-### RFC 7239 forwarded hosts
-
-RFC 7239 `Forwarded` headers can include a `host` parameter that identifies the original `Host` value received by the proxy. Host forwarding is disabled by default because the effective host affects request routing, URL generation, and cache keys. Enable it explicitly:
-
-```hocon
-play.http.forwarded.version = "rfc7239"
-play.http.forwarded.trustForwardedHost = true
-```
-
-Play then uses the `host` parameter from the selected trusted `Forwarded` element as `RequestHeader.host`.
-
-For example:
-
-```http
-Host: play.internal
-Forwarded: for=203.0.113.43;proto=https;host=www.example.com
-```
-
-When the proxy that sent this header is trusted, `request.host` is `www.example.com`. A host containing a port must be quoted because `:` is not valid in an RFC 7239 token:
-
-```http
-Forwarded: for=203.0.113.43;proto=https;host="www.example.com:8443"
-```
-
-IPv6 literals must also be quoted because their brackets are not token characters. As required by [RFC 7239](https://www.rfc-editor.org/rfc/rfc7239.html#section-5.3), the value must conform to the HTTP [`Host` field grammar](https://www.rfc-editor.org/rfc/rfc9110.html#section-7.2), including brackets around IPv6 addresses. If the proxy is not trusted, the selected `Forwarded` element has no valid `host` parameter, or host forwarding is disabled, Play keeps the original `Host` header.
-
-RFC 7239 parameters are independent, so a trusted proxy can send an element containing `host` without `for`. Play can use that host, but stops scanning the forwarded identity chain at the current connection because it cannot verify the preceding node without `for`.
-
-Only rely on forwarded hosts when your trusted edge proxy overwrites or removes any incoming client-supplied `Forwarded` header before setting the correct value. Otherwise, clients may be able to spoof the request host.
-
-The [[Allowed Hosts filter|AllowedHostsFilter]] validates `RequestHeader.host`. When forwarded host handling is enabled, configure `play.filters.hosts.allowed` with the public forwarded hosts rather than only the internal proxy-facing host.
 
 ### Trusting RFC 7239 obfuscated proxy identifiers
 

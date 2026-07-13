@@ -14,8 +14,6 @@ This supports [RFC 7239](https://tools.ietf.org/html/rfc7239) `Forwarded` identi
 
 For RFC 7239 `Forwarded` headers, Play also exposes the selected element's `by` parameter through `RequestHeader.connection.byNode` in Scala, and `Http.RequestHeader.connection().byNode()` in Java. This identifies the proxy interface that received the request represented by `remoteNode`.
 
-Play can also use the selected trusted RFC 7239 `host` parameter for `RequestHeader.host`, allowing applications behind trusted proxies to reconstruct the original public host from standards-based forwarding information. This behavior is disabled by default and can be enabled with `play.http.forwarded.trustForwardedHost = true`.
-
 Known RFC 7239 obfuscated proxy identifiers can also be trusted explicitly:
 
 ```hocon

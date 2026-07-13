@@ -337,102 +337,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       connection.secure must beTrue
     }
 
-    "use rfc7239 host from the selected trusted forwarded entry" in {
-      val forwarding = forwardedRequestToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("127.0.0.1", "192.168.1.1/24") ++
-          trustForwardedHost(true),
-        """
-          |Host: internal.example
-          |Forwarded: for=203.0.113.43;host="public.example:9443"
-          |Forwarded: for=192.168.1.43;host=proxy.example
-        """.stripMargin
-      )
-
-      forwarding.host must beSome("public.example:9443")
-      forwarding.connection.remoteIdentity mustEqual "203.0.113.43"
-    }
-
-    "not use rfc7239 host by default" in {
-      forwardedHostToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for=203.0.113.43;host=public.example
-        """.stripMargin
-      ) must beNone
-    }
-
-    "ignore rfc7239 host when the forwarding proxy is not trusted" in {
-      forwardedHostToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24") ++ trustForwardedHost(true),
-        """
-          |Host: internal.example
-          |Forwarded: for=203.0.113.43;host=public.example
-        """.stripMargin
-      ) must beNone
-    }
-
-    "not reuse rfc7239 host from a different forwarded entry" in {
-      forwardedHostToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("127.0.0.1", "192.168.1.1/24") ++
-          trustForwardedHost(true),
-        """
-          |Host: internal.example
-          |Forwarded: for=203.0.113.43
-          |Forwarded: for=192.168.1.43;host=proxy.example
-        """.stripMargin
-      ) must beNone
-    }
-
-    "ignore invalid rfc7239 host values" in {
-      val forwarding = forwardedRequestToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true),
-        """
-          |Host: internal.example
-          |Forwarded: for=203.0.113.43;proto=https;host="user@example.org"
-        """.stripMargin
-      )
-
-      forwarding.host must beNone
-      forwarding.connection.remoteIdentity mustEqual "203.0.113.43"
-      forwarding.connection.secure must beTrue
-    }
-
-    "use rfc7239 host without for from a directly trusted proxy" in {
-      val forwarding = forwardedRequestToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true),
-        """
-          |Forwarded: host=public.example
-        """.stripMargin
-      )
-
-      forwarding.host must beSome("public.example")
-      forwarding.connection.remoteIdentity mustEqual "127.0.0.1"
-    }
-
-    "stop scanning before entries preceding an rfc7239 host without for" in {
-      val forwarding = forwardedRequestToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true),
-        """
-          |Forwarded: for=203.0.113.43;host=client.example, host=proxy.example
-        """.stripMargin
-      )
-
-      forwarding.host must beSome("proxy.example")
-      forwarding.connection.remoteIdentity mustEqual "127.0.0.1"
-    }
-
-    "not apply trustForwardedHost to x-forwarded headers" in {
-      forwardedHostToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true),
-        """
-          |Forwarded: for=203.0.113.43;host=public.example
-          |X-Forwarded-For: 203.0.113.43
-        """.stripMargin
-      ) must beNone
-    }
-
     "parse x-forwarded entries" in {
       val results = processHeaders(
         version("x-forwarded") ++ trustedProxies("2001:db8:cafe::17"),
@@ -1256,12 +1160,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
   def remoteConnectionToLocalhost(config: Map[String, Any], headersText: String): RemoteConnection =
     handler(config).forwardedConnection(RemoteConnection("127.0.0.1", false, None), headers(headersText))
 
-  def forwardedHostToLocalhost(config: Map[String, Any], headersText: String): Option[String] =
-    forwardedRequestToLocalhost(config, headersText).host
-
-  def forwardedRequestToLocalhost(config: Map[String, Any], headersText: String): ParsedForwarding =
-    handler(config).forwardedRequest(RemoteConnection("127.0.0.1", false, None), headers(headersText))
-
   def remoteConnectionToLocalhostWithPort(
       config: Map[String, Any],
       remotePort: Option[Int],
@@ -1286,10 +1184,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def trustSingleXForwardedPort(b: Boolean) = {
     Map("play.http.forwarded.trustSingleXForwardedPort" -> b)
-  }
-
-  def trustForwardedHost(b: Boolean) = {
-    Map("play.http.forwarded.trustForwardedHost" -> b)
   }
 
   def trustedProxyIdentifiers(s: String*) = {

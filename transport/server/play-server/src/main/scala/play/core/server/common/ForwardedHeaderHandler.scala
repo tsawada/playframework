@@ -71,11 +71,6 @@ import ForwardedHeaderHandler._
  *     A list of RFC 7239 obfuscated proxy identifiers that are ignored when getting the
  *     remote identity. This only applies when using <code>rfc7239</code>.
  *   </dd>
- *   <dt>play.http.forwarded.trustForwardedHost</dt>
- *   <dd>
- *     Whether to use a trusted RFC 7239 <code>host</code> parameter as the
- *     effective request host. This only applies when using <code>rfc7239</code>.
- *   </dd>
  * </dl>
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
@@ -89,63 +84,41 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
    */
   def forwardedConnection(rawConnection: RemoteConnection, headers: Headers): RemoteConnection = new RemoteConnection {
     // All public methods delegate to the lazily calculated connection info
-    override def remoteAddress: InetAddress                           = parsed.connection.remoteAddress
-    override def remoteNode: RemoteNode                               = parsed.connection.remoteNode
-    override def byNode: Option[RemoteNode]                           = parsed.connection.byNode
-    override def remoteIpAddress: Option[InetAddress]                 = parsed.connection.remoteIpAddress
-    override def remotePort: Option[Int]                              = parsed.connection.remotePort
-    override def secure: Boolean                                      = parsed.connection.secure
-    override def clientCertificateChain: Option[Seq[X509Certificate]] = parsed.connection.clientCertificateChain
+    override def remoteAddress: InetAddress                           = parsed.remoteAddress
+    override def remoteNode: RemoteNode                               = parsed.remoteNode
+    override def byNode: Option[RemoteNode]                           = parsed.byNode
+    override def remoteIpAddress: Option[InetAddress]                 = parsed.remoteIpAddress
+    override def remotePort: Option[Int]                              = parsed.remotePort
+    override def secure: Boolean                                      = parsed.secure
+    override def clientCertificateChain: Option[Seq[X509Certificate]] = parsed.clientCertificateChain
 
     /**
      * Perform header parsing lazily, yielding a RemoteConnection with the results.
      */
-    private lazy val parsed: ParsedForwarding = parse(rawConnection, headers)
-  }
+    private lazy val parsed: RemoteConnection = {
+      // Use a mutable iterator for performance when scanning the
+      // header entries. Go through the headers in reverse order because
+      // the nearest proxies will be at the end of the list and we need
+      // to move backwards through the list to get to the original IP.
+      val headerEntries: Iterator[ForwardedEntry] = configuration.forwardedHeaders(headers).reverseIterator
 
-  /**
-   * Update connection and host information in one trusted-proxy scan.
-   *
-   * Host processing is eager when enabled because the server needs the effective
-   * host while constructing the request. Otherwise connection processing remains
-   * lazy through `forwardedConnection`.
-   */
-  def forwardedRequest(rawConnection: RemoteConnection, headers: Headers): ParsedForwarding = {
-    if (configuration.forwardsHost) parse(rawConnection, headers)
-    else ParsedForwarding(forwardedConnection(rawConnection, headers), None)
-  }
+      @tailrec
+      def scan(prev: RemoteConnection): RemoteConnection = {
+        // Check if there's a forwarded header for us to scan.
+        if (headerEntries.hasNext) {
+          // There is a forwarded header from 'prev', so lets check if 'prev' is trusted.
+          // If it's a trusted proxy then process the header, otherwise just use 'prev'.
 
-  private def parse(rawConnection: RemoteConnection, headers: Headers): ParsedForwarding = {
-    // Use a mutable iterator for performance when scanning the
-    // header entries. Go through the headers in reverse order because
-    // the nearest proxies will be at the end of the list and we need
-    // to move backwards through the list to get to the original IP.
-    val headerEntries: Iterator[ForwardedEntry] = configuration.forwardedHeaders(headers).reverseIterator
-
-    @tailrec
-    def scan(prev: RemoteConnection, host: Option[String]): ParsedForwarding = {
-      // Check if there's a forwarded header for us to scan.
-      if (headerEntries.hasNext) {
-        // There is a forwarded header from 'prev', so lets check if 'prev' is trusted.
-        // If it's a trusted proxy then process the header, otherwise just use 'prev'.
-
-        val previousFallbackAddress = configuration.trustedProxyFallbackAddress(prev)
-        if (previousFallbackAddress.isDefined) {
-          // 'prev' is a trusted proxy, so we process the next entry.
-          val entry     = headerEntries.next()
-          val entryHost = configuration.forwardedHost(entry)
-          if (entry.addressString.isEmpty && entryHost.isDefined) {
-            // RFC 7239 parameters are independent. A trusted proxy can forward
-            // the original host without identifying the preceding node, but the
-            // missing identity prevents scanning any earlier elements safely.
-            ParsedForwarding(prev, entryHost)
-          } else {
+          val previousFallbackAddress = configuration.trustedProxyFallbackAddress(prev)
+          if (previousFallbackAddress.isDefined) {
+            // 'prev' is a trusted proxy, so we process the next entry.
+            val entry = headerEntries.next()
             configuration.parseEntry(entry, previousFallbackAddress) match {
               case Left(error) =>
                 ForwardedHeaderHandler.logger.debug(
                   s"Error with info in forwarding header $entry, using $prev instead: $error."
                 )
-                ParsedForwarding(prev, host)
+                prev
               case Right(parsedEntry) =>
                 val connection = RemoteConnection(
                   parsedEntry.address,
@@ -156,26 +129,26 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                   None /* No cert chain for forward headers */
                 )
                 if (configuration.canContinueScanning(parsedEntry.remoteNode)) {
-                  scan(connection, entryHost)
+                  scan(connection)
                 } else {
-                  ParsedForwarding(connection, entryHost)
+                  connection
                 }
             }
+          } else {
+            // 'prev' is not a trusted proxy, so we don't scan ahead in the list of
+            // forwards, we just return 'prev'.
+            prev
           }
         } else {
-          // 'prev' is not a trusted proxy, so we don't scan ahead in the list of
-          // forwards, we just return 'prev'.
-          ParsedForwarding(prev, host)
+          // No more headers to process, so just use its address.
+          prev
         }
-      } else {
-        // No more headers to process, so just use its address.
-        ParsedForwarding(prev, host)
       }
-    }
 
-    // Start scanning through connections starting at the rawConnection that
-    // was made the Play server.
-    scan(rawConnection, None)
+      // Start scanning through connections starting at the rawConnection that
+      // was made the Play server.
+      scan(rawConnection)
+    }
   }
 }
 
@@ -199,11 +172,8 @@ private[server] object ForwardedHeaderHandler {
       addressString: Option[String],
       protoString: Option[String],
       portString: Option[String] = None,
-      byString: Option[String] = None,
-      hostString: Option[String] = None
+      byString: Option[String] = None
   )
-
-  final case class ParsedForwarding(connection: RemoteConnection, host: Option[String])
 
   /**
    * Basic information about an HTTP connection, parsed from a ForwardedEntry.
@@ -231,8 +201,7 @@ private[server] object ForwardedHeaderHandler {
       trustedProxies: List[Subnet],
       trustedProxyIdentifiers: Set[String] = Set.empty,
       trustSingleXForwardedProto: Boolean = false,
-      trustSingleXForwardedPort: Boolean = false,
-      trustForwardedHost: Boolean = false
+      trustSingleXForwardedPort: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -259,8 +228,8 @@ private[server] object ForwardedHeaderHandler {
 
     /**
      * Parse any Forward or X-Forwarded-* headers into a sequence of ForwardedEntry
-     * objects containing optional unparsed connection and request metadata.
-     * Parameter-specific parsing happens while the trusted proxy chain is scanned.
+     * objects. Each object a pair with an optional unparsed address and an
+     * optional unparsed protocol. Further parsing may happen later, see `remoteConnection`.
      * A malformed RFC 7239 field produces an empty entry so trusted-proxy scanning
      * stops at that field.
      */
@@ -271,12 +240,7 @@ private[server] object ForwardedHeaderHandler {
           Rfc7239HeaderParser.parse(headerValue) match {
             case Right(elements) =>
               elements.map { paramMap =>
-                ForwardedEntry(
-                  paramMap.get("for"),
-                  paramMap.get("proto"),
-                  byString = paramMap.get("by"),
-                  hostString = paramMap.get("host")
-                )
+                ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
               }
             case Left(error) =>
               logger.debug(s"Invalid RFC 7239 Forwarded header, treating it as untrusted: $error")
@@ -356,13 +320,7 @@ private[server] object ForwardedHeaderHandler {
                 nodePort.collect { case PortNumber(port) => port }
               }
               val connection =
-                ParsedForwardedEntry(
-                  RemoteNode.Ip(address, remotePort),
-                  fallbackAddress,
-                  remotePort,
-                  secure,
-                  byNode
-                )
+                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure, byNode)
               Right(connection)
             case Right((UnknownIp, nodePort)) =>
               // RFC 7239 allows "unknown" when the proxy cannot or does not want to disclose the node.
@@ -437,14 +395,6 @@ private[server] object ForwardedHeaderHandler {
     def isTrustedProxyIdentifier(identifier: String): Boolean = {
       version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
     }
-
-    /** Whether trusted RFC 7239 host parameters are used. */
-    def forwardsHost: Boolean = version == Rfc7239 && trustForwardedHost
-
-    /** Return a syntactically valid host from this RFC 7239 element when enabled. */
-    def forwardedHost(entry: ForwardedEntry): Option[String] = {
-      Option.when(forwardsHost)(entry.hostString).flatten.flatMap(Rfc7239HostParser.parse)
-    }
   }
 
   object ForwardedHeaderHandlerConfig {
@@ -479,8 +429,7 @@ private[server] object ForwardedHeaderHandler {
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
         trustedProxyIdentifiers.toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
-        config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false),
-        config.getOptional[Boolean]("trustForwardedHost").getOrElse(false)
+        config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false)
       )
     }
   }

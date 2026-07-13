@@ -72,10 +72,10 @@ private[server] class NettyModelConversion(
     }
   }
 
-  /** Capture a request's raw connection info from its channel. */
-  private def createRawRemoteConnection(channel: Channel): RemoteConnection = {
+  /** Capture a request's connection info from its channel and headers. */
+  private def createRemoteConnection(channel: Channel, headers: Headers): RemoteConnection = {
     lazy val socketAddress = channel.remoteAddress().asInstanceOf[InetSocketAddress]
-    new RemoteConnection {
+    val rawConnection      = new RemoteConnection {
       override lazy val remoteAddress: InetAddress                           = socketAddress.getAddress
       override lazy val remotePort: Option[Int]                              = Some(socketAddress.getPort)
       private val sslHandler                                                 = Option(channel.pipeline().get(classOf[SslHandler]))
@@ -90,6 +90,7 @@ private[server] class NettyModelConversion(
         }
       }
     }
+    forwardedHeaderHandler.forwardedConnection(rawConnection, headers)
   }
 
   /** Create request target information from a Netty request. */
@@ -122,26 +123,21 @@ private[server] class NettyModelConversion(
    * later.
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val rawConnection = createRawRemoteConnection(channel)
-    val rawHeaders    = new NettyHeadersWrapper(request.headers)
-    val forwarding    = forwardedHeaderHandler.forwardedRequest(rawConnection, rawHeaders)
-    val headers       = forwarding.host.fold[Headers](rawHeaders)(host => rawHeaders.replace(HOST -> host))
-    val attrs         = TypedMap(
-      // Send an attribute so our tests can tell which kind of server we're using.
-      // We only do this for the "non-default" engine, so we used to tag
-      // pekko-http explicitly, so that benchmarking isn't affected by this.
-      RequestAttrKey.Server -> "netty",
-      // This is the earliest stage of a Play request at which we can set an id.
-      RequestAttrKey.Id -> RequestIdProvider.freshId(),
-    )
-    val effectiveAttrs = forwarding.host.fold(attrs)(host => attrs.updated(RequestAttrKey.EffectiveHost, host))
+    val headers = new NettyHeadersWrapper(request.headers)
     new RequestHeaderImpl(
-      forwarding.connection,
+      createRemoteConnection(channel, headers),
       request.method.name(),
       target,
       request.protocolVersion.text(),
       headers,
-      effectiveAttrs
+      TypedMap(
+        // Send an attribute so our tests can tell which kind of server we're using.
+        // We only do this for the "non-default" engine, so we used to tag
+        // pekko-http explicitly, so that benchmarking isn't affected by this.
+        RequestAttrKey.Server -> "netty",
+        // This is the earliest stage of a Play request at which we can set an id.
+        RequestAttrKey.Id -> RequestIdProvider.freshId(),
+      )
     )
   }
 

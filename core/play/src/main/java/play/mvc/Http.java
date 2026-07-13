@@ -478,11 +478,7 @@ public class Http {
     Request withBody(RequestBody body);
 
     /**
-     * Returns the effective request host, optionally including its port. Trusted forwarding
-     * information selected by the server takes precedence over the request-target authority and the
-     * {@code Host} header. This does not modify {@link #uri()} or {@link #path()}.
-     *
-     * @return the effective request host
+     * @return the request host
      */
     String host();
 
