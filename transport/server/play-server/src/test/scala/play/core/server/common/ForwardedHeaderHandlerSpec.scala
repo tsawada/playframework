@@ -21,37 +21,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       handler(version("rfc7240")) must throwA[PlayException]
     }
 
-    "accept valid trusted proxy identifiers in config" in {
-      val identifiers   = Seq("_edge", "_A0._-")
-      val configuration = ForwardedHeaderHandlerConfig(
-        Some(
-          Configuration
-            .from(version("rfc7239") ++ trustedProxyIdentifiers(identifiers*))
-            .withFallback(Configuration.reference)
-        )
-      )
-
-      configuration.trustedProxyIdentifiers mustEqual identifiers.toSet
-    }
-
-    "reject unknown as a trusted proxy identifier in config" in {
-      handler(version("rfc7239") ++ trustedProxyIdentifiers("unknown")) must throwA[PlayException]
-      handler(version("rfc7239") ++ trustedProxyIdentifiers("UNKNOWN")) must throwA[PlayException]
-    }
-
-    "reject malformed trusted proxy identifiers in config" in {
-      def isRejected(identifier: String): Boolean = {
-        try {
-          handler(version("rfc7239") ++ trustedProxyIdentifiers(identifier))
-          false
-        } catch {
-          case _: PlayException => true
-        }
-      }
-
-      Seq("edge", "_", "_bad!", "_ümlaut").forall(isRejected) must beTrue
-    }
-
     "parse rfc7239 entries" in {
       val results = processHeaders(
         version("rfc7239") ++ trustedProxies("192.0.2.60/24"),
@@ -462,15 +431,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
-    "treat rfc7239 proto schemes case-insensitively" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for=203.0.113.43;proto=HtTpS
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", secure = true, None)
-    }
-
     "handle unquoted IPv6 addresses with rfc7239 for compatibility" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
@@ -581,9 +541,11 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
-    "stop scanning at unknown identifiers with rfc7239" in {
+    "not trust unknown identifiers with rfc7239" in {
       remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
+        version("rfc7239") ++
+          trustedProxies("192.168.1.1/24", "127.0.0.1") ++
+          trustedProxyIdentifiers("unknown"),
         """
           |Forwarded: for=203.0.113.43;proto=https
           |Forwarded: for=unknown;proto=http
@@ -937,16 +899,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |X-Forwarded-For: 203.0.113.43
         """.stripMargin
       ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "treat x-forwarded-proto schemes case-insensitively" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Proto: HtTpS
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", secure = true, None)
     }
 
     "assume http protocol with x-forwarded when proto list is shorter than for list" in {

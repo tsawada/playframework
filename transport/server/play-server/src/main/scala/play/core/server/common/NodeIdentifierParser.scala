@@ -58,7 +58,7 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
 
   private lazy val ipv6Address = regex("[\\da-fA-F:\\.]+".r) ^? inetAddress
 
-  private lazy val obfnode = regex(obfuscatedIdentifierPattern)
+  private lazy val obfnode = regex("_[\\p{Alnum}\\._-]+".r)
 
   private lazy val nodeport = (port | obfport) ^^ {
     case x: Int => PortNumber(x)
@@ -69,7 +69,7 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
     case x if x.toInt <= 65535 => x.toInt
   }
 
-  private def obfport = regex(obfuscatedIdentifierPattern)
+  private def obfport = regex("_[\\p{Alnum}\\._-]+".r)
 
   private def inetAddress = new PartialFunction[String, InetAddress] {
     def isDefinedAt(s: String) = Try { InetAddresses.forString(s) }.isSuccess
@@ -78,11 +78,6 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
 }
 
 private[common] object NodeIdentifierParser {
-  private val obfuscatedIdentifierPattern = "_[A-Za-z0-9._-]+".r
-
-  def isObfuscatedIdentifier(identifier: String): Boolean =
-    obfuscatedIdentifierPattern.pattern.matcher(identifier).matches()
-
   sealed trait Port
   case class PortNumber(number: Int)   extends Port
   case class ObfuscatedPort(s: String) extends Port
