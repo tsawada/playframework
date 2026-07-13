@@ -10,7 +10,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -198,113 +197,6 @@ public class Http {
     }
   }
 
-  public sealed interface RemoteNode
-      permits RemoteNode.Ip, RemoteNode.Obfuscated, RemoteNode.Unknown {
-
-    /**
-     * @return the Scala version of this remote node.
-     */
-    play.api.mvc.request.RemoteConnection.RemoteNode asScala();
-
-    public record Ip(InetAddress address, Optional<Integer> port) implements RemoteNode {
-      @SuppressWarnings("unchecked")
-      @Override
-      public play.api.mvc.request.RemoteConnection.RemoteNode asScala() {
-        scala.Option<Object> scalaPort =
-            (scala.Option<Object>) (scala.Option<?>) OptionConverters.toScala(port);
-        return play.api.mvc.request.RemoteConnection.RemoteNode$.MODULE$.ip(address, scalaPort);
-      }
-    }
-
-    public record Obfuscated(String identifier, Optional<String> port) implements RemoteNode {
-      @Override
-      public play.api.mvc.request.RemoteConnection.RemoteNode asScala() {
-        return new play.api.mvc.request.RemoteConnection$RemoteNode$Obfuscated(
-            identifier, OptionConverters.toScala(port));
-      }
-    }
-
-    public record Unknown(Optional<String> port) implements RemoteNode {
-      @Override
-      public play.api.mvc.request.RemoteConnection.RemoteNode asScala() {
-        return new play.api.mvc.request.RemoteConnection$RemoteNode$Unknown(
-            OptionConverters.toScala(port));
-      }
-    }
-  }
-
-  /** Metadata about the remote connection for a request. */
-  public static final class RemoteConnection {
-    private final play.api.mvc.request.RemoteConnection underlying;
-
-    public RemoteConnection(play.api.mvc.request.RemoteConnection underlying) {
-      this.underlying = underlying;
-    }
-
-    /**
-     * @return the Scala version of this remote connection.
-     */
-    public play.api.mvc.request.RemoteConnection asScala() {
-      return underlying;
-    }
-
-    /**
-     * The selected remote identity.
-     *
-     * <p>When the identity is an IP address, the node may also include the selected remote port.
-     * RFC 7239 {@code unknown} and obfuscated identifiers are represented explicitly so
-     * applications do not need to parse a string value.
-     *
-     * @return the remote node
-     */
-    public RemoteNode remoteNode() {
-      return underlying.remoteNode().asJava();
-    }
-
-    /**
-     * @return the selected remote IP address, if the remote identity is an IP address
-     */
-    public Optional<InetAddress> remoteIpAddress() {
-      return OptionConverters.toJava(underlying.remoteIpAddress());
-    }
-
-    /**
-     * The selected remote identity as a string.
-     *
-     * <p>If the remote identity is an IP address, this returns the address in textual form. If the
-     * remote identity is an RFC 7239 {@code unknown} or obfuscated identifier, this returns that
-     * identifier.
-     *
-     * @return the remote identity
-     */
-    public String remoteIdentity() {
-      return underlying.remoteIdentity();
-    }
-
-    /**
-     * @return the remote port, if known
-     */
-    @SuppressWarnings("unchecked")
-    public Optional<Integer> remotePort() {
-      return (Optional<Integer>) (Optional<?>) OptionConverters.toJava(underlying.remotePort());
-    }
-
-    /**
-     * @return true if the client is using SSL
-     */
-    public boolean secure() {
-      return underlying.secure();
-    }
-
-    /**
-     * @return the client certificate chain, if any
-     */
-    public Optional<List<X509Certificate>> clientCertificateChain() {
-      return OptionConverters.toJava(underlying.clientCertificateChain())
-          .map(list -> new ArrayList<>(Scala.asJava(list)));
-    }
-  }
-
   public interface RequestHeader {
 
     /**
@@ -331,51 +223,14 @@ public class Http {
     String version();
 
     /**
-     * The client IP address, or a fallback IP address when the remote client is represented by an
-     * RFC 7239 unknown or obfuscated identifier.
+     * The client IP address.
      *
      * <p>Retrieves the last untrusted proxy from the Forwarded-Headers or the
      * X-Forwarded-*-Headers.
      *
      * @return the remote address
-     * @deprecated Use {@link #connection()}.{@link RemoteConnection#remoteIdentity()
-     *     remoteIdentity()} for the remote identity as a string, {@link #connection()}.{@link
-     *     RemoteConnection#remoteNode() remoteNode()} for the structured RFC 7239 remote identity,
-     *     or {@link #connection()}.{@link RemoteConnection#remoteIpAddress() remoteIpAddress()} for
-     *     an IP-only value. This legacy address cannot represent RFC 7239 unknown or obfuscated
-     *     identifiers and may return a fallback proxy address when the selected forwarded identity
-     *     is not an IP.
      */
-    @Deprecated
     String remoteAddress();
-
-    /**
-     * The remote identity as a string.
-     *
-     * <p>If the remote identity is an IP address, this returns the address in textual form. If the
-     * remote identity is an RFC 7239 {@code unknown} or obfuscated identifier, this returns that
-     * identifier.
-     *
-     * <p>This is a request-level shortcut for {@link #connection()}.{@link
-     * RemoteConnection#remoteIdentity() remoteIdentity()}.
-     *
-     * @return the remote identity
-     */
-    default String remoteIdentity() {
-      return connection().remoteIdentity();
-    }
-
-    /**
-     * The remote connection metadata for this request.
-     *
-     * <p>This is the primary API for connection metadata such as the selected remote identity, IP
-     * address, port, secure flag, and client certificate chain.
-     *
-     * @return the remote connection metadata
-     */
-    default RemoteConnection connection() {
-      return asScala().connection().asJava();
-    }
 
     /**
      * The client port, if known.
@@ -383,7 +238,7 @@ public class Http {
      * @return the remote port
      */
     default Optional<Integer> remotePort() {
-      return connection().remotePort();
+      return Optional.empty();
     }
 
     /**
@@ -621,9 +476,7 @@ public class Http {
      * @return The chain of X509Certificates used for the request if the request is secure and the
      *     server supports it.
      */
-    default Optional<List<X509Certificate>> clientCertificateChain() {
-      return connection().clientCertificateChain();
-    }
+    Optional<List<X509Certificate>> clientCertificateChain();
 
     /**
      * Create a new version of this object with the given transient language set. The transient
@@ -1267,7 +1120,13 @@ public class Http {
      * @return the builder instance
      */
     public RequestBuilder secure(boolean secure) {
-      req = req.withConnection(req.connection().withSecure(secure));
+      req =
+          req.withConnection(
+              RemoteConnection$.MODULE$.apply(
+                  req.connection().remoteAddress(),
+                  req.connection().remotePort(),
+                  secure,
+                  req.connection().clientCertificateChain()));
       return this;
     }
 
@@ -1478,31 +1337,18 @@ public class Http {
 
     /**
      * @return the remote address
-     * @deprecated Use {@link #connection()}.{@link RemoteConnection#remoteIdentity()
-     *     remoteIdentity()} for the remote identity as a string, {@link #connection()}.{@link
-     *     RemoteConnection#remoteNode() remoteNode()} for the structured RFC 7239 remote identity,
-     *     or {@link #connection()}.{@link RemoteConnection#remoteIpAddress() remoteIpAddress()} for
-     *     an IP-only value. This legacy address cannot represent RFC 7239 unknown or obfuscated
-     *     identifiers and may return a fallback proxy address when the selected forwarded identity
-     *     is not an IP.
      */
-    @Deprecated
     public String remoteAddress() {
       return req.connection().remoteAddressString();
     }
 
     /**
-     * @return the remote connection metadata
-     */
-    public RemoteConnection connection() {
-      return new RemoteConnection(req.connection());
-    }
-
-    /**
      * @return the remote port, if known
      */
+    @SuppressWarnings("unchecked")
     public Optional<Integer> remotePort() {
-      return connection().remotePort();
+      return (Optional<Integer>)
+          (Optional<?>) OptionConverters.toJava(req.connection().remotePort());
     }
 
     /**
@@ -1528,7 +1374,13 @@ public class Http {
     public RequestBuilder remotePort(Optional<Integer> remotePort) {
       scala.Option<Object> scalaRemotePort =
           (scala.Option<Object>) (scala.Option<?>) OptionConverters.toScala(remotePort);
-      req = req.withConnection(req.connection().withRemotePort(scalaRemotePort));
+      req =
+          req.withConnection(
+              RemoteConnection$.MODULE$.apply(
+                  req.connection().remoteAddress(),
+                  scalaRemotePort,
+                  req.connection().secure(),
+                  req.connection().clientCertificateChain()));
       return this;
     }
 
@@ -1544,7 +1396,8 @@ public class Http {
      * @return the client X509Certificates if they have been set
      */
     public Optional<List<X509Certificate>> clientCertificateChain() {
-      return connection().clientCertificateChain();
+      return OptionConverters.toJava(req.connection().clientCertificateChain())
+          .map(list -> new ArrayList<>(Scala.asJava(list)));
     }
 
     /**
@@ -1554,10 +1407,12 @@ public class Http {
     public RequestBuilder clientCertificateChain(List<X509Certificate> clientCertificateChain) {
       req =
           req.withConnection(
-              req.connection()
-                  .withClientCertificateChain(
-                      OptionConverters.toScala(
-                          Optional.ofNullable(Scala.asScala(clientCertificateChain)))));
+              RemoteConnection$.MODULE$.apply(
+                  req.connection().remoteAddress(),
+                  req.connection().remotePort(),
+                  req.connection().secure(),
+                  OptionConverters.toScala(
+                      Optional.ofNullable(Scala.asScala(clientCertificateChain)))));
       return this;
     }
 

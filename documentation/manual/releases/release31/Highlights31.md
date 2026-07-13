@@ -6,15 +6,9 @@ This section highlights the new features of Play 3.1. If you want to learn about
 
 ## Other Additions
 
-### RFC 7239 Remote Identities
-
-Play now exposes the selected remote identity through `RequestHeader.connection.remoteNode` in Scala, and `Http.RequestHeader.connection().remoteNode()` in Java. Applications that need the selected identity as a string can use `RequestHeader.connection.remoteIdentity` in Scala, or `Http.RequestHeader.connection().remoteIdentity()` in Java. `RequestHeader.remoteIdentity` and `Http.RequestHeader.remoteIdentity()` are available as request-level shortcuts.
-
-This supports [RFC 7239](https://tools.ietf.org/html/rfc7239) `Forwarded` identifiers that are not IP addresses, such as `for=unknown` and obfuscated identifiers like `for=_hidden`. The existing `remoteAddress` APIs are deprecated because they cannot represent these identifiers and may return a fallback proxy address when the selected forwarded identity is not an IP address.
-
 ### Remote Connection Port
 
-Play now exposes the remote connection port, when known, through `RequestHeader.connection.remotePort` in Scala, and `Http.RequestHeader.connection().remotePort()` in Java. `RequestHeader.remotePort` and `Http.RequestHeader.remotePort()` are available as request-level shortcuts.
+Play now exposes the remote connection port, when known, through `RequestHeader.remotePort` and `RequestHeader.connection.remotePort` in Scala, and `Http.RequestHeader.remotePort()` in Java.
 
 The Netty and Pekko HTTP server backends populate this value from the raw socket connection. Trusted forwarded headers can also provide this value through RFC 7239 `Forwarded` ports or `X-Forwarded-Port`.
 

@@ -17,44 +17,6 @@ class RemoteConnectionSpec extends Specification {
       RemoteConnection("127.0.0.1", Some(12345), secure = false, None).remotePort must beSome(12345)
     }
 
-    "expose an IP remote node for IP connections" in {
-      val connection = RemoteConnection("127.0.0.1", Some(12345), secure = false, None)
-
-      connection.remoteNode must beEqualTo(
-        RemoteConnection.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), Some(12345))
-      )
-      connection.remoteIpAddress must beSome(InetAddresses.forString("127.0.0.1"))
-      connection.remoteIdentity must beEqualTo("127.0.0.1")
-    }
-
-    "return no remote IP address for obfuscated remote nodes" in {
-      val connection = RemoteConnection(
-        InetAddresses.forString("127.0.0.1"),
-        RemoteConnection.RemoteNode.Obfuscated("_hidden", None),
-        None,
-        secure = false,
-        None
-      )
-
-      connection.remoteNode must beEqualTo(RemoteConnection.RemoteNode.Obfuscated("_hidden", None))
-      connection.remoteIpAddress must beNone
-      connection.remoteIdentity must beEqualTo("_hidden")
-    }
-
-    "return unknown as the remote identity for unknown remote nodes" in {
-      val connection = RemoteConnection(
-        InetAddresses.forString("127.0.0.1"),
-        RemoteConnection.RemoteNode.Unknown(None),
-        None,
-        secure = false,
-        None
-      )
-
-      connection.remoteIdentity must beEqualTo("unknown")
-      connection.remoteIpAddress must beNone
-      connection.remoteNode must beEqualTo(RemoteConnection.RemoteNode.Unknown(None))
-    }
-
     "store the remote port when created from an inet address" in {
       RemoteConnection(InetAddresses.forString("127.0.0.1"), Some(12345), secure = false, None).remotePort must beSome(
         12345

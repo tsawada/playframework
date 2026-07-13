@@ -6,7 +6,6 @@ package play.api.mvc
 
 import java.util.Locale
 
-import com.google.common.net.InetAddresses
 import org.specs2.mutable.Specification
 import play.api.http.HeaderNames._
 import play.api.http.HttpConfiguration
@@ -19,7 +18,6 @@ import play.api.mvc.request.DefaultRequestFactory
 import play.api.mvc.request.RemoteConnection
 import play.api.mvc.request.RequestAttrKey
 import play.api.mvc.request.RequestTarget
-import play.mvc.Http
 
 class RequestHeaderSpec extends Specification {
   "request header" should {
@@ -36,26 +34,6 @@ class RequestHeaderSpec extends Specification {
         val rh = dummyRequestHeader(remotePort = Some(12345))
         rh.remotePort must beSome(12345)
         rh.asJava.remotePort must beEqualTo(java.util.Optional.of(12345))
-      }
-      "keep the remote port in connection" in {
-        val rh = dummyRequestHeader(remotePort = Some(12345))
-        rh.connection.remotePort must beSome(12345)
-        rh.asJava.connection.remotePort must beEqualTo(java.util.Optional.of(12345))
-      }
-      "keep the remote node and remote IP address" in {
-        val rh = dummyRequestHeader(remotePort = Some(12345))
-        rh.connection.remoteNode must beEqualTo(
-          RemoteConnection.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), Some(12345))
-        )
-        rh.connection.remoteIpAddress must beSome(InetAddresses.forString("127.0.0.1"))
-        rh.remoteIdentity must beEqualTo("127.0.0.1")
-        rh.asJava.connection.remoteNode must beEqualTo(
-          new Http.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), java.util.Optional.of(12345))
-        )
-        rh.asJava.connection.remoteIpAddress must beEqualTo(
-          java.util.Optional.of(InetAddresses.forString("127.0.0.1"))
-        )
-        rh.asJava.remoteIdentity must beEqualTo("127.0.0.1")
       }
     }
 
@@ -262,7 +240,7 @@ class RequestHeaderSpec extends Specification {
       remotePort: Option[Int] = None
   ): RequestHeader = {
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
-      connection = RemoteConnection("127.0.0.1", remotePort, false, None),
+      connection = RemoteConnection("", remotePort, false, None),
       method = requestMethod,
       target = RequestTarget(requestUri, "", Map.empty),
       version = "",

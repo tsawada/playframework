@@ -7,7 +7,6 @@ package play.core.server.common
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
-import java.util.Locale
 
 import scala.util.parsing.combinator.RegexParsers
 import scala.util.Try
@@ -40,11 +39,11 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
   private lazy val nodename = version match {
     case Rfc7239 =>
       // RFC 7239 recognizes IPv4 addresses, escaped IPv6 addresses, unknown and obfuscated addresses
-      (ipv4Address | "[" ~> ipv6Address <~ "]" | "(?i)unknown".r | obfnode) ^^ {
-        case x: Inet4Address                                          => Ip(x)
-        case x: Inet6Address                                          => Ip(x)
-        case x if x.toString.toLowerCase(Locale.ENGLISH) == "unknown" => UnknownIp
-        case x                                                        => ObfuscatedIp(x.toString)
+      (ipv4Address | "[" ~> ipv6Address <~ "]" | "unknown" | obfnode) ^^ {
+        case x: Inet4Address => Ip(x)
+        case x: Inet6Address => Ip(x)
+        case "unknown"       => UnknownIp
+        case x               => ObfuscatedIp(x.toString)
       }
     case Xforwarded =>
       // X-Forwarded-For recognizes IPv4 and escaped or unescaped IPv6 addresses

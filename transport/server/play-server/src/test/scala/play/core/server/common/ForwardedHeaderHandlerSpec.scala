@@ -9,7 +9,6 @@ import java.net.InetAddress
 import com.google.common.net.InetAddresses
 import org.specs2.mutable.Specification
 import play.api.mvc.request.RemoteConnection
-import play.api.mvc.request.RemoteConnection.RemoteNode
 import play.api.mvc.Headers
 import play.api.Configuration
 import play.api.PlayException
@@ -38,35 +37,31 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
       results.length must_== 9
       results(0)._1 must_== ForwardedEntry(Some("_gazonk"), None)
-      results(0)._2 must beRight(ParsedForwardedEntry(RemoteNode.Obfuscated("_gazonk", None), None, None, false))
+      results(0)._2 must beLeft
       results(0)._3 must beNone
       results(1)._1 must_== ForwardedEntry(Some("[2001:db8:cafe::17]:4711"), None)
-      results(1)._2 must beRight(
-        ParsedForwardedEntry(RemoteNode.Ip(addr("2001:db8:cafe::17"), Some(4711)), None, Some(4711), false)
-      )
+      results(1)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), Some(4711), false))
       results(1)._3 must beSome(false)
       results(2)._1 must_== ForwardedEntry(Some("192.0.2.60"), Some("http"))
-      results(2)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("192.0.2.60"), None), None, None, false))
+      results(2)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.60"), None, false))
       results(2)._3 must beSome(true)
       results(3)._1 must_== ForwardedEntry(Some("192.0.2.43"), None)
-      results(3)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("192.0.2.43"), None), None, None, false))
+      results(3)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.43"), None, false))
       results(3)._3 must beSome(true)
       results(4)._1 must_== ForwardedEntry(Some("198.51.100.17"), None)
-      results(4)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("198.51.100.17"), None), None, None, false))
+      results(4)._2 must beRight(ParsedForwardedEntry(addr("198.51.100.17"), None, false))
       results(4)._3 must beSome(false)
       results(5)._1 must_== ForwardedEntry(Some("127.0.0.1"), None)
-      results(5)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("127.0.0.1"), None), None, None, false))
+      results(5)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), None, false))
       results(5)._3 must beSome(false)
       results(6)._1 must_== ForwardedEntry(Some("192.0.2.61"), Some("https"))
-      results(6)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("192.0.2.61"), None), None, None, true))
+      results(6)._2 must beRight(ParsedForwardedEntry(addr("192.0.2.61"), None, true))
       results(6)._3 must beSome(true)
       results(7)._1 must_== ForwardedEntry(Some("unknown"), None)
-      results(7)._2 must beRight(ParsedForwardedEntry(RemoteNode.Unknown(None), None, None, false))
+      results(7)._2 must beLeft
       results(7)._3 must beNone
       results(8)._1 must_== ForwardedEntry(Some("[::ffff:192.168.0.9]"), Some("https"))
-      results(8)._2 must beRight(
-        ParsedForwardedEntry(RemoteNode.Ip(addr("::ffff:192.168.0.9"), None), None, None, true)
-      )
+      results(8)._2 must beRight(ParsedForwardedEntry(addr("::ffff:192.168.0.9"), None, true))
       results(8)._3 must beSome(false)
     }
 
@@ -82,21 +77,19 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
       results.length must_== 5
       results(0)._1 must_== ForwardedEntry(Some("192.168.1.1"), Some("https"))
-      results(0)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("192.168.1.1"), None), None, None, true))
+      results(0)._2 must beRight(ParsedForwardedEntry(addr("192.168.1.1"), None, true))
       results(0)._3 must beSome(false)
       results(1)._1 must_== ForwardedEntry(Some("::1"), Some("http"))
-      results(1)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("::1"), None), None, None, false))
+      results(1)._2 must beRight(ParsedForwardedEntry(addr("::1"), None, false))
       results(1)._3 must beSome(false)
       results(2)._1 must_== ForwardedEntry(Some("[2001:db8:cafe::17]"), Some("https"))
-      results(2)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("2001:db8:cafe::17"), None), None, None, true))
+      results(2)._2 must beRight(ParsedForwardedEntry(addr("2001:db8:cafe::17"), None, true))
       results(2)._3 must beSome(true)
       results(3)._1 must_== ForwardedEntry(Some("127.0.0.1"), Some("http"))
-      results(3)._2 must beRight(ParsedForwardedEntry(RemoteNode.Ip(addr("127.0.0.1"), None), None, None, false))
+      results(3)._2 must beRight(ParsedForwardedEntry(addr("127.0.0.1"), None, false))
       results(3)._3 must beSome(false)
       results(4)._1 must_== ForwardedEntry(Some("::ffff:123.123.123.123"), Some("https"))
-      results(4)._2 must beRight(
-        ParsedForwardedEntry(RemoteNode.Ip(addr("::ffff:123.123.123.123"), None), None, None, true)
-      )
+      results(4)._2 must beRight(ParsedForwardedEntry(addr("::ffff:123.123.123.123"), None, true))
       results(4)._3 must beSome(false)
     }
 
@@ -210,40 +203,14 @@ class ForwardedHeaderHandlerSpec extends Specification {
         ) mustEqual RemoteConnection(addr("::ffff:99.99.99.99"), Some(4711), secure = false, None)
     }
 
-    "use obfuscated addresses with rfc7239 and keep the previous IP address as fallback" in {
+    "ignore obfuscated addresses with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
           |Forwarded: for="_gazonk"
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
-      ) mustEqual RemoteConnection(addr("192.168.1.10"), RemoteNode.Obfuscated("_gazonk", None), None, false, None)
-    }
-
-    "use proto from obfuscated addresses with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for="_gazonk";proto=https
-        """.stripMargin
-      ) mustEqual RemoteConnection(addr("127.0.0.1"), RemoteNode.Obfuscated("_gazonk", None), None, secure = true, None)
-    }
-
-    "stop scanning at obfuscated addresses with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |Forwarded: for=203.0.113.43;proto=https
-          |Forwarded: for="_gazonk";proto=http
-          |Forwarded: for=192.168.1.10
-        """.stripMargin
-      ) mustEqual RemoteConnection(
-        addr("192.168.1.10"),
-        RemoteNode.Obfuscated("_gazonk", None),
-        None,
-        secure = false,
-        None
-      )
+      ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
     "ignore obfuscated ports with rfc7239" in {
@@ -255,33 +222,24 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.0.2.43", false, None)
     }
 
-    "use unknown addresses with rfc7239 and keep the previous IP address as fallback" in {
+    "ignore unknown addresses with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
           |Forwarded: for=unknown
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
-      ) mustEqual RemoteConnection(addr("192.168.1.10"), RemoteNode.Unknown(None), None, false, None)
+      ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    "use unknown addresses with ports with rfc7239" in {
+    "ignore unknown addresses with ports with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
           |Forwarded: for=unknown:1234
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
-      ) mustEqual RemoteConnection(addr("192.168.1.10"), RemoteNode.Unknown(Some("1234")), None, false, None)
-    }
-
-    "use unknown addresses case-insensitively with rfc7239" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for=Unknown;proto=https
-        """.stripMargin
-      ) mustEqual RemoteConnection(addr("127.0.0.1"), RemoteNode.Unknown(None), None, secure = true, None)
+      ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
     "ignore rfc7239 header with empty addresses" in {
@@ -828,7 +786,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
       val errorOrConnection = configuration.parseEntry(forwardedEntry)
       val trusted           = errorOrConnection match {
         case Left(_)           => None
-        case Right(connection) => connection.remoteIpAddress.map(configuration.isTrustedProxy)
+        case Right(connection) => Some(configuration.isTrustedProxy(connection.address))
       }
       (forwardedEntry, errorOrConnection, trusted)
     }

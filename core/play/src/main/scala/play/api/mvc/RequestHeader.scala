@@ -27,10 +27,7 @@ trait RequestHeader {
   top =>
 
   /**
-   * The remote connection metadata for this request.
-   *
-   * This is the primary API for connection metadata such as the selected remote
-   * identity, IP address, port, secure flag, and client certificate chain.
+   * The remote connection that made the request.
    */
   def connection: RemoteConnection
 
@@ -103,38 +100,20 @@ trait RequestHeader {
   def headers: Headers
 
   /**
-   * Return a new copy of the request with its HTTP headers changed.
+   * The remote connection that made the request.
    */
   def withHeaders(newHeaders: Headers): RequestHeader =
     new RequestHeaderImpl(connection, method, target, version, newHeaders, attrs)
 
   /**
-   * The client IP address, or a fallback IP address when the remote client is
-   * represented by an RFC 7239 unknown or obfuscated identifier.
+   * The client IP address.
    *
    * retrieves the last untrusted proxy
    * from the Forwarded-Headers or the X-Forwarded-*-Headers.
    *
    * This method delegates to `connection.remoteAddressString`.
    */
-  @deprecated(
-    "Use connection.remoteIdentity for the remote identity as a string, connection.remoteNode for the structured RFC 7239 remote identity, or connection.remoteIpAddress for an IP-only value. " +
-      "This legacy address cannot represent RFC 7239 unknown or obfuscated identifiers and may " +
-      "return a fallback proxy address when the selected forwarded identity is not an IP.",
-    "3.1.0"
-  )
   final def remoteAddress: String = connection.remoteAddressString
-
-  /**
-   * The remote identity as a string.
-   *
-   * If the remote identity is an IP address, this returns the address in textual
-   * form. If the remote identity is an RFC 7239 `unknown` or obfuscated
-   * identifier, this returns that identifier.
-   *
-   * This is a request-level shortcut for `connection.remoteIdentity`.
-   */
-  final def remoteIdentity: String = connection.remoteIdentity
 
   /**
    * The client port, if known.
