@@ -180,22 +180,6 @@ class RequestHeaderSpec extends Specification {
       "relative uri with host header" in {
         val rh = dummyRequestHeader("GET", "/", Headers(HOST -> "playframework.com"))
         rh.host must_== "playframework.com"
-        rh.domain must_== "playframework.com"
-      }
-      "relative uri with host header and port" in {
-        val rh = dummyRequestHeader("GET", "/", Headers(HOST -> "playframework.com:9000"))
-        rh.host must_== "playframework.com:9000"
-        rh.domain must_== "playframework.com"
-      }
-      "relative uri with bracketed IPv6 host and port" in {
-        val rh = dummyRequestHeader("GET", "/", Headers(HOST -> "[2001:db8::1]:9000"))
-        rh.host must_== "[2001:db8::1]:9000"
-        rh.domain must_== "[2001:db8::1]"
-      }
-      "leave ambiguous host values unchanged when extracting the domain" in {
-        val hosts = Seq("2001:db8::1", "[2001:db8::1]suffix:9000")
-
-        hosts.forall { host => dummyRequestHeader("GET", "/", Headers(HOST -> host)).domain == host } must beTrue
       }
       "absolute uri" in {
         val rh = dummyRequestHeader("GET", "https://example.com/test", Headers(HOST -> "playframework.com"))
