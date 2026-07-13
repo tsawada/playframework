@@ -284,20 +284,6 @@ This setting only applies when `play.http.forwarded.version = "x-forwarded"`. It
 
 Only enable this when your trusted edge proxy overwrites or removes any incoming client-supplied `X-Forwarded-Proto` header before setting the correct value. Otherwise, clients may be able to spoof whether a request was secure.
 
-### Trusting X-Forwarded-Proto without X-Forwarded-For
-
-Some proxy setups send `X-Forwarded-Proto` without sending `X-Forwarded-For`. By default, Play ignores that protocol value because there is no forwarded address chain to attach it to.
-
-If your trusted proxy is known to set `X-Forwarded-Proto` to the protocol used by the request before it reached Play, you can enable:
-
-```
-play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor = true
-```
-
-This setting only applies when `play.http.forwarded.version = "x-forwarded"`. It uses a single `X-Forwarded-Proto` value only when `X-Forwarded-For` is absent and the immediate proxy connection is trusted. It updates `RequestHeader.connection.secure`, but it does not change `remoteNode`, `remoteIdentity`, or `remoteIpAddress`.
-
-Only enable this when your trusted proxy overwrites or removes any incoming client-supplied `X-Forwarded-Proto` header before setting the correct value. Otherwise, clients may be able to spoof whether a request was secure.
-
 ### Trusting a single X-Forwarded-Port value
 
 Play uses `X-Forwarded-Port` when it can match port values to `X-Forwarded-For` addresses. A single `X-Forwarded-Port` value is used automatically when there is a single `X-Forwarded-For` address. Multiple port values are paired with forwarded addresses by position when both headers contain the same number of values.

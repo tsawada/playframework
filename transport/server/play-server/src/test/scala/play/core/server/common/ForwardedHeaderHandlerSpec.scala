@@ -1134,58 +1134,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection(localhost, false, None)
     }
 
-    "use single x-forwarded-proto without x-forwarded-for when enabled and proxy is trusted" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
-        """
-          |X-Forwarded-Proto: https
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, true, None)
-    }
-
-    "use single x-forwarded-proto without x-forwarded-for case-insensitively" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
-        """
-          |X-Forwarded-Proto: HTTPS
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, true, None)
-    }
-
-    "ignore single x-forwarded-proto without x-forwarded-for when proxy is untrusted" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("192.0.2.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
-        """
-          |X-Forwarded-Proto: https
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, false, None)
-    }
-
-    "ignore multiple x-forwarded-proto values without x-forwarded-for even when enabled" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
-        """
-          |X-Forwarded-Proto: https, http
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, false, None)
-    }
-
-    "not apply trustXForwardedProtoWithoutXForwardedFor while forwarding an rfc7239 host" in {
-      val forwarding = forwardedRequestToLocalhost(
-        version("rfc7239") ++
-          trustedProxies("127.0.0.1") ++
-          trustForwardedHost(true) ++
-          trustXForwardedProtoWithoutXForwardedFor(true),
-        """
-          |Forwarded: host=public.example
-          |X-Forwarded-Proto: HTTPS
-        """.stripMargin
-      )
-
-      forwarding.connection mustEqual RemoteConnection(localhost, false, None)
-      forwarding.host must beSome("public.example")
-    }
-
     "assume http protocol with x-forwarded when proto list is longer than for list" in {
       remoteConnectionToLocalhost(
         version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
@@ -1334,10 +1282,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def trustSingleXForwardedProto(b: Boolean) = {
     Map("play.http.forwarded.trustSingleXForwardedProto" -> b)
-  }
-
-  def trustXForwardedProtoWithoutXForwardedFor(b: Boolean) = {
-    Map("play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor" -> b)
   }
 
   def trustSingleXForwardedPort(b: Boolean) = {

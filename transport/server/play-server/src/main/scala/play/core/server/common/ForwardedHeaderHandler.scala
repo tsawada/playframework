@@ -47,10 +47,6 @@ import ForwardedHeaderHandler._
  * When `play.http.forwarded.trustSingleXForwardedProto` is enabled, a lone
  * `X-Forwarded-Proto` entry is associated with the client address instead of
  * being discarded.
- * When `play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor` is
- * enabled, a lone `X-Forwarded-Proto` entry without `X-Forwarded-For` updates
- * the protocol of the trusted proxy connection without changing the remote
- * identity.
  * When `play.http.forwarded.trustSingleXForwardedPort` is enabled, a lone
  * `X-Forwarded-Port` entry is associated with the client address instead of
  * being discarded.
@@ -144,29 +140,25 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
             // missing identity prevents scanning any earlier elements safely.
             ParsedForwarding(prev, entryHost)
           } else {
-            configuration.xForwardedSecureWithoutFor(entry) match {
-              case Some(secure) => ParsedForwarding(prev.withSecure(secure), host)
-              case None         =>
-                configuration.parseEntry(entry, previousFallbackAddress) match {
-                  case Left(error) =>
-                    ForwardedHeaderHandler.logger.debug(
-                      s"Error with info in forwarding header $entry, using $prev instead: $error."
-                    )
-                    ParsedForwarding(prev, host)
-                  case Right(parsedEntry) =>
-                    val connection = RemoteConnection(
-                      parsedEntry.address,
-                      parsedEntry.remoteNode,
-                      parsedEntry.remotePort,
-                      parsedEntry.byNode,
-                      parsedEntry.secure,
-                      None /* No cert chain for forward headers */
-                    )
-                    if (configuration.canContinueScanning(parsedEntry.remoteNode)) {
-                      scan(connection, entryHost)
-                    } else {
-                      ParsedForwarding(connection, entryHost)
-                    }
+            configuration.parseEntry(entry, previousFallbackAddress) match {
+              case Left(error) =>
+                ForwardedHeaderHandler.logger.debug(
+                  s"Error with info in forwarding header $entry, using $prev instead: $error."
+                )
+                ParsedForwarding(prev, host)
+              case Right(parsedEntry) =>
+                val connection = RemoteConnection(
+                  parsedEntry.address,
+                  parsedEntry.remoteNode,
+                  parsedEntry.remotePort,
+                  parsedEntry.byNode,
+                  parsedEntry.secure,
+                  None /* No cert chain for forward headers */
+                )
+                if (configuration.canContinueScanning(parsedEntry.remoteNode)) {
+                  scan(connection, entryHost)
+                } else {
+                  ParsedForwarding(connection, entryHost)
                 }
             }
           }
@@ -240,8 +232,7 @@ private[server] object ForwardedHeaderHandler {
       trustedProxyIdentifiers: Set[String] = Set.empty,
       trustSingleXForwardedProto: Boolean = false,
       trustSingleXForwardedPort: Boolean = false,
-      trustForwardedHost: Boolean = false,
-      trustXForwardedProtoWithoutXForwardedFor: Boolean = false
+      trustForwardedHost: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -333,12 +324,8 @@ private[server] object ForwardedHeaderHandler {
           }
         }
 
-        if (forHeaders.isEmpty && trustXForwardedProtoWithoutXForwardedFor && protoHeaders.length == 1) {
-          Seq(ForwardedEntry(None, protoHeaders.headOption))
-        } else {
-          forHeaders.zipWithIndex.map {
-            case (f, index) => ForwardedEntry(Some(f), protoForIndex(index), portForIndex(index))
-          }
+        forHeaders.zipWithIndex.map {
+          case (f, index) => ForwardedEntry(Some(f), protoForIndex(index), portForIndex(index))
         }
     }
 
@@ -458,15 +445,6 @@ private[server] object ForwardedHeaderHandler {
     def forwardedHost(entry: ForwardedEntry): Option[String] = {
       Option.when(forwardsHost)(entry.hostString).flatten.flatMap(Rfc7239HostParser.parse)
     }
-
-    /** Interpret a lone X-Forwarded-Proto entry that has no X-Forwarded-For identity. */
-    def xForwardedSecureWithoutFor(entry: ForwardedEntry): Option[Boolean] = {
-      if (version == Xforwarded && trustXForwardedProtoWithoutXForwardedFor && entry.addressString.isEmpty) {
-        entry.protoString.map(_.equalsIgnoreCase("https"))
-      } else {
-        None
-      }
-    }
   }
 
   object ForwardedHeaderHandlerConfig {
@@ -502,8 +480,7 @@ private[server] object ForwardedHeaderHandler {
         trustedProxyIdentifiers.toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
         config.getOptional[Boolean]("trustSingleXForwardedPort").getOrElse(false),
-        config.getOptional[Boolean]("trustForwardedHost").getOrElse(false),
-        config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false)
+        config.getOptional[Boolean]("trustForwardedHost").getOrElse(false)
       )
     }
   }
