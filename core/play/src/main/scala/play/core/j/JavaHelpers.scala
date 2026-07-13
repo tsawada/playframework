@@ -101,7 +101,6 @@ trait JavaHelpers {
         override def remoteAddress: InetAddress                           = c.remoteAddress
         override def remoteAddressString: String                          = c.remoteAddressString
         override def remoteNode: RemoteConnection.RemoteNode              = c.remoteNode
-        override def byNode: Option[RemoteConnection.RemoteNode]          = c.byNode
         override def remoteIpAddress: Option[InetAddress]                 = c.remoteIpAddress
         override def remotePort: Option[Int]                              = c.remotePort
         override def secure: Boolean                                      = newSecure

@@ -158,7 +158,7 @@ ProxyPassReverse / http://localhost:9998
 
 ## Configuring trusted proxies
 
-Play supports various forwarded headers used by proxies to indicate the incoming remote identity, IP address, receiving proxy node, port, and protocol of requests. Play uses this configuration to calculate the correct value for the `remoteNode`, `remoteIdentity`, `remoteIpAddress`, `byNode`, `remotePort`, and `secure` fields of `RequestHeader.connection`.
+Play supports various forwarded headers used by proxies to indicate the incoming remote identity, IP address, port, and protocol of requests. Play uses this configuration to calculate the correct value for the `remoteNode`, `remoteIdentity`, `remoteIpAddress`, `remotePort`, and `secure` fields of `RequestHeader.connection`.
 
 It is trivial for an HTTP client, whether it's a browser or other client, to forge forwarded headers, thereby spoofing the remote identity and protocol that Play reports. Consequently, Play needs to know which proxies are trusted. Play provides configuration options to configure trusted proxies, and will validate the incoming forwarded headers to verify that they are trusted, taking the first untrusted remote identity that it finds as the reported user remote identity (or the first identity if all proxies are trusted.)
 
@@ -196,8 +196,6 @@ For more information, please read the [RFC 7239](https://tools.ietf.org/html/rfc
 RFC 7239 `Forwarded` headers can identify the remote client with an IP address, the `unknown` identifier, or an obfuscated identifier such as `_hidden`. Play exposes this value through `RequestHeader.connection.remoteNode`.
 
 Use `RequestHeader.connection.remoteIdentity` when you need the selected remote identity as a string. `RequestHeader.remoteIdentity` is available as a request-level shortcut. When the selected remote node is an IP address, `RequestHeader.connection.remoteIpAddress` contains that address. When the selected remote node is `unknown` or obfuscated, `remoteIpAddress` is empty. The deprecated `RequestHeader.remoteAddress` method still returns a fallback IP address for compatibility, usually the previous trusted proxy address, and should not be used when applications need the actual RFC 7239 remote identity.
-
-When an RFC 7239 `Forwarded` element contains a `by` parameter, Play exposes it through `RequestHeader.connection.byNode`. This identifies the proxy interface that received the request represented by `remoteNode`; it is not the selected remote client identity.
 
 If Play selects an `unknown` or untrusted obfuscated remote node while scanning a trusted proxy chain, it stops scanning at that node because it cannot determine whether the non-IP identifier represents a trusted proxy.
 

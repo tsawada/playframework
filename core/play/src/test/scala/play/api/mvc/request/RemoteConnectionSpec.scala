@@ -55,35 +55,6 @@ class RemoteConnectionSpec extends Specification {
       connection.remoteNode must beEqualTo(RemoteConnection.RemoteNode.Unknown(None))
     }
 
-    "store the receiving proxy node when supplied" in {
-      val connection = RemoteConnection(
-        InetAddresses.forString("127.0.0.1"),
-        RemoteConnection.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), None),
-        None,
-        Some(RemoteConnection.RemoteNode.Obfuscated("_edge", None)),
-        secure = false,
-        None
-      )
-
-      connection.byNode must beSome(RemoteConnection.RemoteNode.Obfuscated("_edge", None))
-    }
-
-    "preserve the receiving proxy node when copying connection metadata" in {
-      val byNode     = RemoteConnection.RemoteNode.Obfuscated("_edge", None)
-      val connection = RemoteConnection(
-        InetAddresses.forString("127.0.0.1"),
-        RemoteConnection.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), None),
-        None,
-        Some(byNode),
-        secure = false,
-        None
-      )
-
-      connection.withRemotePort(Some(12345)).byNode must beSome(byNode)
-      connection.withSecure(secure = true).byNode must beSome(byNode)
-      connection.withClientCertificateChain(None).byNode must beSome(byNode)
-    }
-
     "store the remote port when created from an inet address" in {
       RemoteConnection(InetAddresses.forString("127.0.0.1"), Some(12345), secure = false, None).remotePort must beSome(
         12345
@@ -99,22 +70,6 @@ class RemoteConnectionSpec extends Specification {
     "include the remote port when comparing connections" in {
       RemoteConnection("127.0.0.1", Some(12345), secure = false, None) must not(
         beEqualTo(RemoteConnection("127.0.0.1", Some(54321), secure = false, None))
-      )
-    }
-
-    "include the receiving proxy node when comparing connections" in {
-      val address    = InetAddresses.forString("127.0.0.1")
-      val remoteNode = RemoteConnection.RemoteNode.Ip(address, None)
-
-      RemoteConnection(
-        address,
-        remoteNode,
-        None,
-        Some(RemoteConnection.RemoteNode.Obfuscated("_edge", None)),
-        secure = false,
-        None
-      ) must not(
-        beEqualTo(RemoteConnection(address, remoteNode, None, None, secure = false, None))
       )
     }
 

@@ -86,7 +86,6 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
     // All public methods delegate to the lazily calculated connection info
     override def remoteAddress: InetAddress                           = parsed.remoteAddress
     override def remoteNode: RemoteNode                               = parsed.remoteNode
-    override def byNode: Option[RemoteNode]                           = parsed.byNode
     override def remoteIpAddress: Option[InetAddress]                 = parsed.remoteIpAddress
     override def remotePort: Option[Int]                              = parsed.remotePort
     override def secure: Boolean                                      = parsed.secure
@@ -124,7 +123,6 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                   parsedEntry.address,
                   parsedEntry.remoteNode,
                   parsedEntry.remotePort,
-                  parsedEntry.byNode,
                   parsedEntry.secure,
                   None /* No cert chain for forward headers */
                 )
@@ -165,14 +163,13 @@ private[server] object ForwardedHeaderHandler {
   type HeaderParser = Headers => Seq[ForwardedEntry]
 
   /**
-   * An unparsed address, protocol, port, and receiving proxy node from a forwarded
-   * header. Each value is optional.
+   * An unparsed address, protocol, and port from a forwarded header. Each value is
+   * optional.
    */
   final case class ForwardedEntry(
       addressString: Option[String],
       protoString: Option[String],
-      portString: Option[String] = None,
-      byString: Option[String] = None
+      portString: Option[String] = None
   )
 
   /**
@@ -185,8 +182,7 @@ private[server] object ForwardedHeaderHandler {
       remoteNode: RemoteNode,
       fallbackAddress: Option[InetAddress],
       remotePort: Option[Int],
-      secure: Boolean,
-      byNode: Option[RemoteNode] = None
+      secure: Boolean
   ) {
     def remoteIpAddress: Option[InetAddress] = remoteNode match {
       case RemoteNode.Ip(address, _) => Some(address)
@@ -258,9 +254,7 @@ private[server] object ForwardedHeaderHandler {
           }
           .toMap
 
-        params.map { (paramMap: Map[String, String]) =>
-          ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
-        }
+        params.map { (paramMap: Map[String, String]) => ForwardedEntry(paramMap.get("for"), paramMap.get("proto")) }
       }
 
       case Xforwarded =>
@@ -314,10 +308,6 @@ private[server] object ForwardedHeaderHandler {
         entry: ForwardedEntry,
         fallbackAddress: Option[InetAddress] = None
     ): Either[String, ParsedForwardedEntry] = {
-      val byNode = entry.byString.flatMap { byString =>
-        parseRemoteNode(byString).toOption
-      }
-
       entry.addressString match {
         case None =>
           // We had a forwarding header, but it was missing the address entry for some reason.
@@ -331,19 +321,13 @@ private[server] object ForwardedHeaderHandler {
                 nodePort.collect { case PortNumber(port) => port }
               }
               val connection =
-                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure, byNode)
+                ParsedForwardedEntry(RemoteNode.Ip(address, remotePort), fallbackAddress, remotePort, secure)
               Right(connection)
             case Right((UnknownIp, nodePort)) =>
               // RFC 7239 allows "unknown" when the proxy cannot or does not want to disclose the node.
               val secure     = entry.protoString.fold(false)(_ == "https") // Assume insecure by default
               val connection =
-                ParsedForwardedEntry(
-                  RemoteNode.Unknown(nodePort.flatMap(portString)),
-                  fallbackAddress,
-                  None,
-                  secure,
-                  byNode
-                )
+                ParsedForwardedEntry(RemoteNode.Unknown(nodePort.flatMap(portString)), fallbackAddress, None, secure)
               Right(connection)
             case Right((ObfuscatedIp(identifier), nodePort)) =>
               // RFC 7239 allows obfuscated identifiers such as "_hidden" to avoid disclosing the node.
@@ -353,25 +337,13 @@ private[server] object ForwardedHeaderHandler {
                   RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString)),
                   fallbackAddress,
                   None,
-                  secure,
-                  byNode
+                  secure
                 )
               Right(connection)
             case errorOrNonIp =>
               // The forwarding address entry couldn't be parsed for some reason.
               Left(s"Parse error: $errorOrNonIp")
           }
-      }
-    }
-
-    private def parseRemoteNode(nodeString: String): Either[String, RemoteNode] = {
-      nodeIdentifierParser.parseNode(nodeString).map {
-        case (Ip(address), nodePort) =>
-          RemoteNode.Ip(address, nodePort.collect { case PortNumber(port) => port })
-        case (UnknownIp, nodePort) =>
-          RemoteNode.Unknown(nodePort.flatMap(portString))
-        case (ObfuscatedIp(identifier), nodePort) =>
-          RemoteNode.Obfuscated(identifier, nodePort.flatMap(portString))
       }
     }
 

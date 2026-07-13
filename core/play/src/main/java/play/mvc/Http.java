@@ -262,18 +262,6 @@ public class Http {
     }
 
     /**
-     * The RFC 7239 {@code by} node for the selected forwarded element, if present.
-     *
-     * <p>This identifies the proxy interface that received the request represented by {@link
-     * #remoteNode()}. It is not the selected remote identity; use {@link #remoteNode()} for that.
-     *
-     * @return the receiving proxy node
-     */
-    public Optional<RemoteNode> byNode() {
-      return OptionConverters.toJava(underlying.byNode()).map(node -> node.asJava());
-    }
-
-    /**
      * @return the selected remote IP address, if the remote identity is an IP address
      */
     public Optional<InetAddress> remoteIpAddress() {

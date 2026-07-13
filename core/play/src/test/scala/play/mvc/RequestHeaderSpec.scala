@@ -150,22 +150,12 @@ class RequestHeaderSpec extends Specification {
 
     "remote node" in {
       "wrap scala remote connections" in {
-        val scalaConnection = RemoteConnection(
-          InetAddresses.forString("127.0.0.1"),
-          RemoteConnection.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), Some(12345)),
-          Some(12345),
-          Some(RemoteConnection.RemoteNode.Obfuscated("_edge", None)),
-          secure = true,
-          None
-        )
-        val javaConnection = new Http.RemoteConnection(scalaConnection)
+        val scalaConnection = RemoteConnection("127.0.0.1", Some(12345), secure = true, None)
+        val javaConnection  = new Http.RemoteConnection(scalaConnection)
 
         javaConnection.asScala must beEqualTo(scalaConnection)
         javaConnection.remoteNode must beEqualTo(
           new Http.RemoteNode.Ip(InetAddresses.forString("127.0.0.1"), java.util.Optional.of(12345))
-        )
-        javaConnection.byNode must beEqualTo(
-          java.util.Optional.of(new Http.RemoteNode.Obfuscated("_edge", java.util.Optional.empty[String]))
         )
         javaConnection.remoteIpAddress must beEqualTo(java.util.Optional.of(InetAddresses.forString("127.0.0.1")))
         javaConnection.remoteIdentity must beEqualTo("127.0.0.1")

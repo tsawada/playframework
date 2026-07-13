@@ -12,8 +12,6 @@ Play now exposes the selected remote identity through `RequestHeader.connection.
 
 This supports [RFC 7239](https://tools.ietf.org/html/rfc7239) `Forwarded` identifiers that are not IP addresses, such as `for=unknown` and obfuscated identifiers like `for=_hidden`. The existing `remoteAddress` APIs are deprecated because they cannot represent these identifiers and may return a fallback proxy address when the selected forwarded identity is not an IP address.
 
-For RFC 7239 `Forwarded` headers, Play also exposes the selected element's `by` parameter through `RequestHeader.connection.byNode` in Scala, and `Http.RequestHeader.connection().byNode()` in Java. This identifies the proxy interface that received the request represented by `remoteNode`.
-
 Known RFC 7239 obfuscated proxy identifiers can also be trusted explicitly:
 
 ```hocon

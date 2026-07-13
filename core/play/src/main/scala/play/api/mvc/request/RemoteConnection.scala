@@ -54,15 +54,6 @@ trait RemoteConnection {
   def remoteNode: RemoteNode = RemoteNode.Ip(remoteAddress, remotePort)
 
   /**
-   * The RFC 7239 `by` node for the selected forwarded element, if present.
-   *
-   * This identifies the proxy interface that received the request represented by
-   * `remoteNode`. It is not the selected remote identity; use `remoteNode` for
-   * that.
-   */
-  def byNode: Option[RemoteNode] = None
-
-  /**
    * The selected remote IP address, if the remote identity is an IP address.
    */
   def remoteIpAddress: Option[InetAddress] = remoteNode match {
@@ -107,36 +98,34 @@ trait RemoteConnection {
    * Return a copy of this remote connection with the given remote port.
    */
   def withRemotePort(remotePort: Option[Int]): RemoteConnection =
-    RemoteConnection(remoteAddress, remoteNode, remotePort, byNode, secure, clientCertificateChain)
+    RemoteConnection(remoteAddress, remoteNode, remotePort, secure, clientCertificateChain)
 
   /**
    * Return a copy of this remote connection with the given secure flag.
    */
   def withSecure(secure: Boolean): RemoteConnection =
-    RemoteConnection(remoteAddress, remoteNode, remotePort, byNode, secure, clientCertificateChain)
+    RemoteConnection(remoteAddress, remoteNode, remotePort, secure, clientCertificateChain)
 
   /**
    * Return a copy of this remote connection with the given client certificate chain.
    */
   def withClientCertificateChain(clientCertificateChain: Option[Seq[X509Certificate]]): RemoteConnection =
-    RemoteConnection(remoteAddress, remoteNode, remotePort, byNode, secure, clientCertificateChain)
+    RemoteConnection(remoteAddress, remoteNode, remotePort, secure, clientCertificateChain)
 
   override def toString: String =
-    s"RemoteConnection(address=${remoteAddress.getHostAddress}, remoteNode=$remoteNode, byNode=$byNode, port=$remotePort, secure=$secure, certs=$clientCertificateChain)"
+    s"RemoteAddress(${remoteAddress.getHostAddress}, node=$remoteNode, port=$remotePort, secure=$secure, certs=$clientCertificateChain)"
 
   override def equals(obj: scala.Any): Boolean = obj match {
     case that: RemoteConnection =>
       (this.remoteAddress == that.remoteAddress) &&
       (this.remoteNode == that.remoteNode) &&
-      (this.byNode == that.byNode) &&
       (this.remotePort == that.remotePort) &&
       (this.secure == that.secure) &&
       (this.clientCertificateChain == that.clientCertificateChain)
     case _ => false
   }
 
-  override def hashCode(): Int =
-    (remoteAddress, remoteNode, byNode, remotePort, secure, clientCertificateChain).hashCode()
+  override def hashCode(): Int = (remoteAddress, remoteNode, remotePort, secure, clientCertificateChain).hashCode()
 }
 
 object RemoteConnection {
@@ -230,30 +219,14 @@ object RemoteConnection {
       secure: Boolean,
       clientCertificateChain: Option[Seq[X509Certificate]]
   ): RemoteConnection = {
-    apply(remoteAddress, remoteNode, remotePort, None, secure, clientCertificateChain)
-  }
-
-  /**
-   * Create a RemoteConnection object.
-   */
-  def apply(
-      remoteAddress: InetAddress,
-      remoteNode: RemoteNode,
-      remotePort: Option[Int],
-      byNode: Option[RemoteNode],
-      secure: Boolean,
-      clientCertificateChain: Option[Seq[X509Certificate]]
-  ): RemoteConnection = {
     val s   = secure
     val ra  = remoteAddress
     val rn  = remoteNode
     val rp  = remotePort
-    val bn  = byNode
     val ccc = clientCertificateChain
     new RemoteConnection {
       override val remoteAddress: InetAddress                           = ra
       override val remoteNode: RemoteNode                               = rn
-      override val byNode: Option[RemoteNode]                           = bn
       override val remotePort: Option[Int]                              = rp
       override val secure: Boolean                                      = s
       override val clientCertificateChain: Option[Seq[X509Certificate]] = ccc
