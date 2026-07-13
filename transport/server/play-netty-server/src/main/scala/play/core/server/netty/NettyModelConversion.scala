@@ -74,10 +74,8 @@ private[server] class NettyModelConversion(
 
   /** Capture a request's connection info from its channel and headers. */
   private def createRemoteConnection(channel: Channel, headers: Headers): RemoteConnection = {
-    lazy val socketAddress = channel.remoteAddress().asInstanceOf[InetSocketAddress]
-    val rawConnection      = new RemoteConnection {
-      override lazy val remoteAddress: InetAddress                           = socketAddress.getAddress
-      override lazy val remotePort: Option[Int]                              = Some(socketAddress.getPort)
+    val rawConnection = new RemoteConnection {
+      override lazy val remoteAddress: InetAddress                           = channel.remoteAddress().asInstanceOf[InetSocketAddress].getAddress
       private val sslHandler                                                 = Option(channel.pipeline().get(classOf[SslHandler]))
       override def secure: Boolean                                           = sslHandler.isDefined
       override lazy val clientCertificateChain: Option[Seq[X509Certificate]] = {

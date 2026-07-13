@@ -116,20 +116,5 @@ class RequestHeaderSpec extends Specification {
         requestHeader().asJava.hasBody must beFalse
       }
     }
-
-    "remote port" in {
-      "expose the scala request remote port" in {
-        val request = requestHeader().withConnection(RemoteConnection("127.0.0.1", Some(12345), secure = false, None))
-
-        request.asJava.remotePort must beEqualTo(java.util.Optional.of(12345))
-      }
-
-      "be set by the request builder" in {
-        val request = new Http.RequestBuilder().remoteAddress("127.0.0.1").remotePort(12345).build()
-
-        request.remotePort must beEqualTo(java.util.Optional.of(12345))
-        request.asScala.connection.remotePort must beSome(12345)
-      }
-    }
   }
 }

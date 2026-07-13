@@ -6,12 +6,6 @@ This section highlights the new features of Play 3.1. If you want to learn about
 
 ## Other Additions
 
-### Remote Connection Port
-
-Play now exposes the remote connection port, when known, through `RequestHeader.remotePort` and `RequestHeader.connection.remotePort` in Scala, and `Http.RequestHeader.remotePort()` in Java.
-
-The Netty and Pekko HTTP server backends populate this value from the raw socket connection. If trusted forwarded headers replace the remote address and do not provide a port, the remote port is unknown.
-
 ### Trusting Single X-Forwarded-Proto Values
 
 Play can now be configured to trust a single `X-Forwarded-Proto` value when `X-Forwarded-For` contains multiple addresses:

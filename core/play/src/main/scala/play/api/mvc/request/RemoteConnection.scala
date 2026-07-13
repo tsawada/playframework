@@ -27,11 +27,6 @@ trait RemoteConnection {
   def remoteAddressString: String = remoteAddress.getHostAddress
 
   /**
-   * The remote client's port, if known.
-   */
-  def remotePort: Option[Int] = None
-
-  /**
    * Whether or not the connection was over a secure (e.g. HTTPS) connection.
    */
   def secure: Boolean
@@ -41,19 +36,15 @@ trait RemoteConnection {
    */
   def clientCertificateChain: Option[Seq[X509Certificate]]
 
-  override def toString: String =
-    s"RemoteAddress($remoteAddressString, port=$remotePort, secure=$secure, certs=$clientCertificateChain)"
+  override def toString: String = s"RemoteAddress($remoteAddressString, secure=$secure, certs=$clientCertificateChain)"
 
   override def equals(obj: scala.Any): Boolean = obj match {
     case that: RemoteConnection =>
       (this.remoteAddress == that.remoteAddress) &&
-      (this.remotePort == that.remotePort) &&
       (this.secure == that.secure) &&
       (this.clientCertificateChain == that.clientCertificateChain)
     case _ => false
   }
-
-  override def hashCode(): Int = (remoteAddress, remotePort, secure, clientCertificateChain).hashCode()
 }
 
 object RemoteConnection {
@@ -66,26 +57,12 @@ object RemoteConnection {
       secure: Boolean,
       clientCertificateChain: Option[Seq[X509Certificate]]
   ): RemoteConnection = {
-    apply(remoteAddressString, None, secure, clientCertificateChain)
-  }
-
-  /**
-   * Create a RemoteConnection object. The address string is parsed lazily.
-   */
-  def apply(
-      remoteAddressString: String,
-      remotePort: Option[Int],
-      secure: Boolean,
-      clientCertificateChain: Option[Seq[X509Certificate]]
-  ): RemoteConnection = {
     val s   = secure
     val ras = remoteAddressString
-    val rp  = remotePort
     val ccc = clientCertificateChain
     new RemoteConnection {
       override lazy val remoteAddress: InetAddress                      = InetAddresses.forString(ras)
       override val remoteAddressString: String                          = ras
-      override val remotePort: Option[Int]                              = rp
       override val secure: Boolean                                      = s
       override val clientCertificateChain: Option[Seq[X509Certificate]] = ccc
     }
@@ -99,25 +76,11 @@ object RemoteConnection {
       secure: Boolean,
       clientCertificateChain: Option[Seq[X509Certificate]]
   ): RemoteConnection = {
-    apply(remoteAddress, None, secure, clientCertificateChain)
-  }
-
-  /**
-   * Create a RemoteConnection object.
-   */
-  def apply(
-      remoteAddress: InetAddress,
-      remotePort: Option[Int],
-      secure: Boolean,
-      clientCertificateChain: Option[Seq[X509Certificate]]
-  ): RemoteConnection = {
     val s   = secure
     val ra  = remoteAddress
-    val rp  = remotePort
     val ccc = clientCertificateChain
     new RemoteConnection {
       override val remoteAddress: InetAddress                           = ra
-      override val remotePort: Option[Int]                              = rp
       override val secure: Boolean                                      = s
       override val clientCertificateChain: Option[Seq[X509Certificate]] = ccc
     }

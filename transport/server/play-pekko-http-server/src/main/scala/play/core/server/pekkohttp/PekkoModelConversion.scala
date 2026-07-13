@@ -92,7 +92,6 @@ private[server] class PekkoModelConversion(
       forwardedHeaderHandler.forwardedConnection(
         new RemoteConnection {
           override def remoteAddress: InetAddress                           = remoteAddressArg.getAddress
-          override def remotePort: Option[Int]                              = Some(remoteAddressArg.getPort)
           override def secure: Boolean                                      = secureProtocol
           override def clientCertificateChain: Option[Seq[X509Certificate]] = {
             try {

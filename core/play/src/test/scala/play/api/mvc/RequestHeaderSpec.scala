@@ -30,11 +30,6 @@ class RequestHeaderSpec extends Specification {
         val rh = dummyRequestHeader("GET", "/", Headers(HOST -> "playframework.com"))
         rh.asJava.headers.contains("host") must beTrue
       }
-      "keep the remote port" in {
-        val rh = dummyRequestHeader(remotePort = Some(12345))
-        rh.remotePort must beSome(12345)
-        rh.asJava.remotePort must beEqualTo(java.util.Optional.of(12345))
-      }
     }
 
     "have typed attributes" in {
@@ -236,11 +231,10 @@ class RequestHeaderSpec extends Specification {
       requestMethod: String = "GET",
       requestUri: String = "/",
       headers: Headers = Headers(),
-      attrs: TypedMap = TypedMap.empty,
-      remotePort: Option[Int] = None
+      attrs: TypedMap = TypedMap.empty
   ): RequestHeader = {
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
-      connection = RemoteConnection("", remotePort, false, None),
+      connection = RemoteConnection("", false, None),
       method = requestMethod,
       target = RequestTarget(requestUri, "", Map.empty),
       version = "",

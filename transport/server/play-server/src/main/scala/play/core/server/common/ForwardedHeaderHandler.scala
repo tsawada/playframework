@@ -69,7 +69,6 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
   def forwardedConnection(rawConnection: RemoteConnection, headers: Headers): RemoteConnection = new RemoteConnection {
     // All public methods delegate to the lazily calculated connection info
     override def remoteAddress: InetAddress                           = parsed.remoteAddress
-    override def remotePort: Option[Int]                              = parsed.remotePort
     override def secure: Boolean                                      = parsed.secure
     override def clientCertificateChain: Option[Seq[X509Certificate]] = parsed.clientCertificateChain
 
@@ -103,7 +102,6 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                 scan(
                   RemoteConnection(
                     parsedEntry.address,
-                    None,
                     parsedEntry.secure,
                     None /* No cert chain for forward headers */
                   )

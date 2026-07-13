@@ -309,23 +309,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.0.2.43", true, None)
     }
 
-    "preserve the raw remote port when no forwarded headers are present" in {
-      noConfigHandler.forwardedConnection(
-        RemoteConnection(localhost, Some(12345), secure = false, None),
-        Headers()
-      ) mustEqual RemoteConnection(localhost, Some(12345), secure = false, None)
-    }
-
-    "clear the raw remote port when x-forwarded changes the remote address" in {
-      remoteConnectionToLocalhostWithPort(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        Some(12345),
-        """
-          |X-Forwarded-For: 192.0.2.43
-        """.stripMargin
-      ) mustEqual RemoteConnection("192.0.2.43", false, None)
-    }
-
     "trust IPv4 and IPv6 localhost with x-forwarded when there is config with default settings" in {
       remoteConnectionToLocalhost(
         version("x-forwarded"),
@@ -576,16 +559,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
 
   def remoteConnectionToLocalhost(config: Map[String, Any], headersText: String): RemoteConnection =
     handler(config).forwardedConnection(RemoteConnection("127.0.0.1", false, None), headers(headersText))
-
-  def remoteConnectionToLocalhostWithPort(
-      config: Map[String, Any],
-      remotePort: Option[Int],
-      headersText: String
-  ): RemoteConnection =
-    handler(config).forwardedConnection(
-      RemoteConnection("127.0.0.1", remotePort, secure = false, None),
-      headers(headersText)
-    )
 
   def version(s: String) = {
     Map("play.http.forwarded.version" -> s)
