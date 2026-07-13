@@ -133,52 +133,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
-    "parse rfc7239 quoted-pair escapes in forwarded nodes" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: for="_edge\.1";by="_proxy\-1"
-          """.stripMargin
-        )
-      )
-
-      results(0)._1 must_== ForwardedEntry(Some("_edge.1"), None, byString = Some("_proxy-1"))
-      results(0)._2 must beRight(
-        ParsedForwardedEntry(
-          RemoteNode.Obfuscated("_edge.1", None),
-          None,
-          None,
-          false,
-          Some(RemoteNode.Obfuscated("_proxy-1", None))
-        )
-      )
-    }
-
-    "parse rfc7239 lists and parameters with separators inside quoted strings" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: for="_bad,stillbad";proto=https, for=203.0.113.43
-            |Forwarded: for="_bad;stillbad";proto=https, for=198.51.100.17
-            |Forwarded: for="_bad=stillbad";proto=https, for=192.0.2.43
-          """.stripMargin
-        )
-      )
-
-      results.map(_._1) must containTheSameElementsAs(
-        Seq(
-          ForwardedEntry(Some("_bad,stillbad"), Some("https")),
-          ForwardedEntry(Some("203.0.113.43"), None),
-          ForwardedEntry(Some("_bad;stillbad"), Some("https")),
-          ForwardedEntry(Some("198.51.100.17"), None),
-          ForwardedEntry(Some("_bad=stillbad"), Some("https")),
-          ForwardedEntry(Some("192.0.2.43"), None)
-        )
-      )
-    }
-
     "expose rfc7239 by entries on the selected remote connection" in {
       val connection = remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
@@ -518,17 +472,21 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    "ignore an unterminated rfc7239 quoted value" in {
+    // This quotation handling is not RFC-compliant but we want to make sure we
+    // at least handle the case gracefully.
+    "don't unquote rfc7239 header field with one \" character" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
-          |Forwarded: for="
+          |Forwarded: for==
           |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    "ignore an empty rfc7239 quoted value" in {
+    // This quotation handling is not RFC-compliant but we want to make sure we
+    // at least handle the case gracefully.
+    "unquote and ignore rfc7239 empty quoted header field" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
@@ -538,7 +496,9 @@ class ForwardedHeaderHandlerSpec extends Specification {
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
     }
 
-    "ignore a malformed rfc7239 value with three quote characters" in {
+    // This quotation handling is not RFC-compliant but we want to make sure we
+    // at least handle the case gracefully.
+    "kind of unquote rfc7239 header field with three \" characters" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
         """
@@ -546,16 +506,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
                                                     |Forwarded: for=192.168.1.10, for=127.0.0.1
         """.stripMargin
       ) mustEqual RemoteConnection("192.168.1.10", false, None)
-    }
-
-    "not decode quoted-pair escapes in x-forwarded headers" in {
-      remoteConnectionToLocalhost(
-        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
-        """
-          |X-Forwarded-For: 203.0.113.43
-          |X-Forwarded-Proto: "h\ttps"
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
     }
 
     "default to trusting IPv4 and IPv6 localhost with x-forwarded when there is no config" in {

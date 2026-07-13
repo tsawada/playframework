@@ -205,63 +205,14 @@ private[server] object ForwardedHeaderHandler {
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
-    private def stripQuotes(s: String): String = {
+    /**
+     * Removes surrounding quotes if present, otherwise returns original string.
+     * Not RFC compliant. To be compliant we need proper header field parsing.
+     */
+    private def unquote(s: String): String = {
       if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
         s.substring(1, s.length - 1)
       } else s
-    }
-
-    /**
-     * Removes surrounding RFC 7239 quotes and decodes quoted-pair escapes,
-     * otherwise returns the original string.
-     */
-    private def unquoteRfc7239(s: String): String = {
-      if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
-        val builder = new StringBuilder(s.length - 2)
-        var index   = 1
-        while (index < s.length - 1) {
-          val char = s.charAt(index)
-          if (char == '\\' && index + 1 < s.length - 1) {
-            builder.append(s.charAt(index + 1))
-            index += 2
-          } else {
-            builder.append(char)
-            index += 1
-          }
-        }
-        builder.result()
-      } else s
-    }
-
-    private def splitOutsideQuotes(s: String, separator: Char): Seq[String] = {
-      val entries = Vector.newBuilder[String]
-      val current = new StringBuilder(s.length)
-      var quoted  = false
-      var escaped = false
-      var index   = 0
-
-      while (index < s.length) {
-        val char = s.charAt(index)
-        if (escaped) {
-          current.append(char)
-          escaped = false
-        } else if (quoted && char == '\\') {
-          current.append(char)
-          escaped = true
-        } else if (char == '"') {
-          current.append(char)
-          quoted = !quoted
-        } else if (!quoted && char == separator) {
-          entries += current.result().trim
-          current.clear()
-        } else {
-          current.append(char)
-        }
-        index += 1
-      }
-
-      entries += current.result().trim
-      entries.result()
     }
 
     private def parsePort(s: String): Option[Int] = {
@@ -288,20 +239,24 @@ private[server] object ForwardedHeaderHandler {
       case Rfc7239 => {
         val params = for {
           fhs <- headers.getAll("Forwarded")
-          fh  <- splitOutsideQuotes(fhs, ',')
-        } yield splitOutsideQuotes(fh, ';').iterator.flatMap {
-          _.span(_ != '=') match {
-            case (_, "") => Option.empty[(String, String)] // no value
+          fh  <- fhs.split(",\\s*")
+        } yield fh
+          .split(";")
+          .iterator
+          .flatMap {
+            _.span(_ != '=') match {
+              case (_, "") => Option.empty[(String, String)] // no value
 
-            case (rawName, v) => {
-              // Remove surrounding quotes
-              val name  = rawName.toLowerCase(java.util.Locale.ENGLISH)
-              val value = unquoteRfc7239(v.tail)
+              case (rawName, v) => {
+                // Remove surrounding quotes
+                val name  = rawName.toLowerCase(java.util.Locale.ENGLISH)
+                val value = unquote(v.tail)
 
-              Some(name -> value)
+                Some(name -> value)
+              }
             }
           }
-        }.toMap
+          .toMap
 
         params.map { (paramMap: Map[String, String]) =>
           ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
@@ -309,7 +264,7 @@ private[server] object ForwardedHeaderHandler {
       }
 
       case Xforwarded =>
-        def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(stripQuotes)
+        def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(unquote)
         val forHeaders                 = h(headers, "X-Forwarded-For")
         val protoHeaders               = h(headers, "X-Forwarded-Proto")
         val portHeaders                = h(headers, "X-Forwarded-Port")
