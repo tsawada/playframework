@@ -316,16 +316,6 @@ object BuildSettings {
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.filters.https.RedirectHttpsConfiguration.copy"),
       ProblemFilters.exclude[DirectMissingMethodProblem]("play.filters.https.RedirectHttpsConfiguration.this"),
       ProblemFilters.exclude[MissingTypesProblem]("play.filters.https.RedirectHttpsConfiguration$"),
-      // Add trustSingleXForwardedProto to ForwardedHeaderHandlerConfig
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedHeaderHandlerConfig.apply"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedHeaderHandlerConfig.copy"
-      ),
-      ProblemFilters.exclude[DirectMissingMethodProblem](
-        "play.core.server.common.ForwardedHeaderHandler#ForwardedHeaderHandlerConfig.this"
-      ),
       // Switch to Jakarta DI
       ProblemFilters.exclude[IncompatibleMethTypeProblem]("play.api.http.DefaultHttpErrorHandler.this"),
       ProblemFilters.exclude[IncompatibleMethTypeProblem]("play.api.http.DefaultHttpRequestHandler.this"),

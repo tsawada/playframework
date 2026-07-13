@@ -6,18 +6,6 @@ This section highlights the new features of Play 3.1. If you want to learn about
 
 ## Other Additions
 
-### Trusting Single X-Forwarded-Proto Values
-
-Play can now be configured to trust a single `X-Forwarded-Proto` value when `X-Forwarded-For` contains multiple addresses:
-
-```hocon
-play.http.forwarded.trustSingleXForwardedProto = true
-```
-
-This helps deployments where trusted proxy chains append to `X-Forwarded-For`, but the edge proxy sets one `X-Forwarded-Proto` value for the original client request. The setting is disabled by default and only applies to `play.http.forwarded.version = "x-forwarded"`.
-
-Only enable it when the trusted edge proxy overwrites or strips any incoming client-supplied `X-Forwarded-Proto` header before setting the correct value.
-
 ### WebSocket Compression
 
 The Play Pekko HTTP and Netty server backends now support WebSocket compression using the RFC 7692 `permessage-deflate` extension.

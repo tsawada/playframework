@@ -34,11 +34,9 @@ import ForwardedHeaderHandler._
  *    immediate connection info and don't do any further processing.
  *
  * Each address is associated with a secure or insecure protocol by pairing
- * it with a `proto` entry in the headers. If the `proto` entry is missing, or if
- * `proto` entries can't be matched with addresses, then the default is insecure.
- * When `play.http.forwarded.trustSingleXForwardedProto` is enabled, a lone
- * `X-Forwarded-Proto` entry is associated with the client address instead of
- * being discarded.
+ * it with a `proto` entry in the headers. If the `proto` entry is missing or
+ * if `proto` entries can't be matched with addresses, then the default is
+ * insecure.
  *
  * It is configured by two configuration options:
  * <dl>
@@ -148,11 +146,7 @@ private[server] object ForwardedHeaderHandler {
    */
   final case class ParsedForwardedEntry(address: InetAddress, secure: Boolean)
 
-  case class ForwardedHeaderHandlerConfig(
-      version: ForwardedHeaderVersion,
-      trustedProxies: List[Subnet],
-      trustSingleXForwardedProto: Boolean = false
-  ) {
+  case class ForwardedHeaderHandlerConfig(version: ForwardedHeaderVersion, trustedProxies: List[Subnet]) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
     /**
@@ -203,14 +197,6 @@ private[server] object ForwardedHeaderHandler {
         if (forHeaders.length == protoHeaders.length) {
           forHeaders.lazyZip(protoHeaders).map { (f, p) =>
             ForwardedEntry(Some(f), Some(p))
-          }
-        } else if (trustSingleXForwardedProto && forHeaders.nonEmpty && protoHeaders.length == 1) {
-          // A single X-Forwarded-Proto entry describes the protocol the client used to reach
-          // the outermost proxy. Associate it with the client (the first X-Forwarded-For
-          // entry); the remaining entries are left without a protocol.
-          forHeaders.zipWithIndex.map {
-            case (f, 0) => ForwardedEntry(Some(f), protoHeaders.headOption)
-            case (f, _) => ForwardedEntry(Some(f), None)
           }
         } else {
           // If the lengths vary, then discard the protoHeaders because we can't tell which
@@ -266,11 +252,7 @@ private[server] object ForwardedHeaderHandler {
         case _             => throw config.reportError("version", "Forwarded header version must be either x-forwarded or rfc7239")
       }
 
-      ForwardedHeaderHandlerConfig(
-        version,
-        config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false)
-      )
+      ForwardedHeaderHandlerConfig(version, config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList)
     }
   }
 }
