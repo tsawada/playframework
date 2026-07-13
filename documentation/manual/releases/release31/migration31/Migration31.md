@@ -57,21 +57,6 @@ request.secure                     // true
 The deprecated `request.remoteAddress` method still returns the fallback legacy value, such as
 `"127.0.0.1"` in this example.
 
-### RFC 7239 Forwarded header syntax is validated
-
-Play now validates RFC 7239 `Forwarded` field values before using them. Parameter names must be valid tokens, values must be tokens or quoted strings, and a parameter cannot occur more than once in one forwarded element. Empty HTTP list elements remain accepted and are ignored.
-
-RFC 7239 requires IPv6 addresses and node identifiers with ports to be quoted because they contain `:`:
-
-```http
-Forwarded: for="[2001:db8:cafe::17]:4711"
-Forwarded: for="192.0.2.43:4711"
-```
-
-For compatibility with Play 3.0, Play continues to accept these values without quotes in the `for` parameter. Play applies the same allowance to `by` for consistent node parsing. Proxy configurations should nevertheless be updated to emit the quoted RFC syntax. Other parameters do not receive this compatibility allowance.
-
-When Play encounters a malformed `Forwarded` field while scanning a trusted proxy chain, it stops at that field and keeps the last verified connection information. Check that each trusted proxy emits valid RFC 7239 syntax before upgrading.
-
 ### HEAD responses no longer include generated Content-Length headers
 
 Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.

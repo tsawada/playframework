@@ -87,7 +87,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
             |Forwarded: for=192.0.2.44;by="_edge"
             |Forwarded: for=192.0.2.45;by=unknown
             |Forwarded: for=192.0.2.46;by="[2001:db8:cafe::17]:4711"
-            |Forwarded: for=192.0.2.47;by="???"
+            |Forwarded: for=192.0.2.47;by=???
           """.stripMargin
         )
       )
@@ -177,120 +177,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
           ForwardedEntry(Some("192.0.2.43"), None)
         )
       )
-    }
-
-    "parse all rfc7239 token characters" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: !#$%&'*+-.^_`|~=value;for=203.0.113.43
-          """.stripMargin
-        )
-      )
-
-      results.map(_._1) must containTheSameElementsAs(Seq(ForwardedEntry(Some("203.0.113.43"), None)))
-    }
-
-    "parse empty rfc7239 parameter slots" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: ;for=203.0.113.43;;proto=https;
-          """.stripMargin
-        )
-      )
-
-      results.map(_._1) must containTheSameElementsAs(
-        Seq(ForwardedEntry(Some("203.0.113.43"), Some("https")))
-      )
-    }
-
-    "ignore empty rfc7239 list elements" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: , , for=203.0.113.43, , for=127.0.0.1, ,
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "ignore empty rfc7239 list elements split over header fields" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: , ,
-          |Forwarded: for=203.0.113.43, for=127.0.0.1
-          |Forwarded: ,
-        """.stripMargin
-      ) mustEqual RemoteConnection("203.0.113.43", false, None)
-    }
-
-    "reject combined rfc7239 fields containing only empty list elements" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: , ,
-            |Forwarded: ,
-          """.stripMargin
-        )
-      )
-
-      results must haveSize(1)
-      results.head._1 must_== ForwardedEntry(None, None)
-      results.head._2 must beLeft
-    }
-
-    "reject duplicate rfc7239 parameters case-insensitively" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: for=203.0.113.43;For=198.51.100.17
-          """.stripMargin
-        )
-      )
-
-      results must haveSize(1)
-      results.head._1 must_== ForwardedEntry(None, None)
-      results.head._2 must beLeft
-    }
-
-    "stop trusted proxy scanning at a malformed rfc7239 field" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
-        """
-          |Forwarded: for=203.0.113.43
-          |Forwarded: for=198.51.100.17;for=192.0.2.43
-          |Forwarded: for=192.168.1.43, for=127.0.0.1
-        """.stripMargin
-      ) mustEqual RemoteConnection("192.168.1.43", false, None)
-    }
-
-    "reject a complete rfc7239 field when one of its elements is malformed" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for=203.0.113.43, for=127.0.0.1;for=192.0.2.43
-        """.stripMargin
-      ) mustEqual RemoteConnection(localhost, None, secure = false, None)
-    }
-
-    "reject whitespace around rfc7239 parameter separators" in {
-      val results = processHeaders(
-        version("rfc7239") ++ trustedProxies(),
-        headers(
-          """
-            |Forwarded: for =203.0.113.43
-            |Forwarded: for=203.0.113.43 ;proto=https
-            |Forwarded: for=203.0.113.43; proto=https
-          """.stripMargin
-        )
-      )
-
-      results.map(_._1) must containTheSameElementsAs(Seq.fill(3)(ForwardedEntry(None, None)))
     }
 
     "expose rfc7239 by entries on the selected remote connection" in {
@@ -431,7 +317,7 @@ class ForwardedHeaderHandlerSpec extends Specification {
       )
     }
 
-    "handle unquoted IPv6 addresses with rfc7239 for compatibility" in {
+    "handle IPv6 addresses with rfc7239" in {
       remoteConnectionToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
         """
@@ -706,22 +592,6 @@ class ForwardedHeaderHandlerSpec extends Specification {
           |Forwarded: for="192.0.2.43:443";proto=https
         """.stripMargin
       ) mustEqual RemoteConnection("192.0.2.43", Some(443), secure = true, None)
-    }
-
-    "use unquoted rfc7239 node ports for compatibility" in {
-      remoteConnectionToLocalhost(
-        version("rfc7239") ++ trustedProxies("127.0.0.1"),
-        """
-          |Forwarded: for=192.0.2.43:443;by=[2001:db8:cafe::17]:8080
-        """.stripMargin
-      ) mustEqual RemoteConnection(
-        addr("192.0.2.43"),
-        RemoteNode.Ip(addr("192.0.2.43"), Some(443)),
-        Some(443),
-        Some(RemoteNode.Ip(addr("2001:db8:cafe::17"), Some(8080))),
-        secure = false,
-        None
-      )
     }
 
     "use the port from an rfc7239 forwarded IPv6 address" in {

@@ -211,6 +211,59 @@ private[server] object ForwardedHeaderHandler {
       } else s
     }
 
+    /**
+     * Removes surrounding RFC 7239 quotes and decodes quoted-pair escapes,
+     * otherwise returns the original string.
+     */
+    private def unquoteRfc7239(s: String): String = {
+      if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
+        val builder = new StringBuilder(s.length - 2)
+        var index   = 1
+        while (index < s.length - 1) {
+          val char = s.charAt(index)
+          if (char == '\\' && index + 1 < s.length - 1) {
+            builder.append(s.charAt(index + 1))
+            index += 2
+          } else {
+            builder.append(char)
+            index += 1
+          }
+        }
+        builder.result()
+      } else s
+    }
+
+    private def splitOutsideQuotes(s: String, separator: Char): Seq[String] = {
+      val entries = Vector.newBuilder[String]
+      val current = new StringBuilder(s.length)
+      var quoted  = false
+      var escaped = false
+      var index   = 0
+
+      while (index < s.length) {
+        val char = s.charAt(index)
+        if (escaped) {
+          current.append(char)
+          escaped = false
+        } else if (quoted && char == '\\') {
+          current.append(char)
+          escaped = true
+        } else if (char == '"') {
+          current.append(char)
+          quoted = !quoted
+        } else if (!quoted && char == separator) {
+          entries += current.result().trim
+          current.clear()
+        } else {
+          current.append(char)
+        }
+        index += 1
+      }
+
+      entries += current.result().trim
+      entries.result()
+    }
+
     private def parsePort(s: String): Option[Int] = {
       if (s.matches("\\d{1,5}")) {
         val port = s.toInt
@@ -230,26 +283,29 @@ private[server] object ForwardedHeaderHandler {
      * Parse any Forward or X-Forwarded-* headers into a sequence of ForwardedEntry
      * objects. Each object a pair with an optional unparsed address and an
      * optional unparsed protocol. Further parsing may happen later, see `remoteConnection`.
-     * A malformed RFC 7239 field produces an empty entry so trusted-proxy scanning
-     * stops at that field.
      */
     def forwardedHeaders(headers: Headers): Seq[ForwardedEntry] = version match {
       case Rfc7239 => {
-        val headerValues = headers.getAll("Forwarded")
-        val entries      = headerValues.flatMap { headerValue =>
-          Rfc7239HeaderParser.parse(headerValue) match {
-            case Right(elements) =>
-              elements.map { paramMap =>
-                ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
-              }
-            case Left(error) =>
-              logger.debug(s"Invalid RFC 7239 Forwarded header, treating it as untrusted: $error")
-              Seq(ForwardedEntry(None, None))
+        val params = for {
+          fhs <- headers.getAll("Forwarded")
+          fh  <- splitOutsideQuotes(fhs, ',')
+        } yield splitOutsideQuotes(fh, ';').iterator.flatMap {
+          _.span(_ != '=') match {
+            case (_, "") => Option.empty[(String, String)] // no value
+
+            case (rawName, v) => {
+              // Remove surrounding quotes
+              val name  = rawName.toLowerCase(java.util.Locale.ENGLISH)
+              val value = unquoteRfc7239(v.tail)
+
+              Some(name -> value)
+            }
           }
+        }.toMap
+
+        params.map { (paramMap: Map[String, String]) =>
+          ForwardedEntry(paramMap.get("for"), paramMap.get("proto"), byString = paramMap.get("by"))
         }
-        // Forwarded uses 1#forwarded-element, so the combined field value must
-        // contain an element even though empty HTTP list members are ignored.
-        if (headerValues.nonEmpty && entries.isEmpty) Seq(ForwardedEntry(None, None)) else entries
       }
 
       case Xforwarded =>

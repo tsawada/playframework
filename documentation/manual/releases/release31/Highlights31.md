@@ -22,8 +22,6 @@ play.http.forwarded.trustedProxyIdentifiers = ["_edge"]
 
 This allows Play to continue scanning through configured obfuscated proxy identifiers. The setting only applies to RFC 7239 `Forwarded` headers and does not make the `unknown` identifier trusted.
 
-Play also validates RFC 7239 field syntax, including tokens, quoted strings, quoted-pair escapes, HTTP lists, and duplicate parameters. Malformed fields stop trusted-proxy scanning at the last verified connection instead of being skipped. Existing support for unquoted `for` node values containing IPv6 addresses or ports remains available for Play 3.0 compatibility. Play applies the same allowance to `by` values for consistent node parsing, although proxies should emit the quoted RFC syntax.
-
 ### Remote Connection Port
 
 Play now exposes the remote connection port, when known, through `RequestHeader.connection.remotePort` in Scala, and `Http.RequestHeader.connection().remotePort()` in Java. `RequestHeader.remotePort` and `Http.RequestHeader.remotePort()` are available as request-level shortcuts.

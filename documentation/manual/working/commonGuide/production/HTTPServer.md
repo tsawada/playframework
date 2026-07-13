@@ -191,21 +191,6 @@ This is configured using `play.http.forwarded.version`, with valid values being 
 
 For more information, please read the [RFC 7239](https://tools.ietf.org/html/rfc7239) specification.
 
-### RFC 7239 syntax validation
-
-Play validates `Forwarded` field values using the RFC 7239 token, quoted-string, parameter, and HTTP list syntax. Parameter names cannot be repeated within one forwarded element. Empty HTTP list elements are ignored.
-
-RFC 7239 requires IPv6 addresses and node identifiers containing a port to be quoted because `:` is not valid in an unquoted token:
-
-```http
-Forwarded: for="[2001:db8:cafe::17]:4711"
-Forwarded: for="192.0.2.43:4711"
-```
-
-For compatibility with Play 3.0, Play also accepts these node values without quotes in the `for` parameter. Play applies the same allowance to `by` for consistent node parsing. New and updated proxy configurations should emit the quoted RFC 7239 syntax. This compatibility does not allow non-token characters in other parameter values.
-
-If a `Forwarded` field value is malformed, Play treats that field as an unverifiable proxy boundary. Trusted-proxy scanning stops when it reaches that field and keeps the last verified connection information; it never skips malformed forwarding information to trust an earlier entry.
-
 ### RFC 7239 remote identities
 
 RFC 7239 `Forwarded` headers can identify the remote client with an IP address, the `unknown` identifier, or an obfuscated identifier such as `_hidden`. Play exposes this value through `RequestHeader.connection.remoteNode`.
