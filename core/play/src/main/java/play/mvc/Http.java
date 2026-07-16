@@ -223,16 +223,6 @@ public class Http {
     String version();
 
     /**
-     * The client IP address.
-     *
-     * <p>Retrieves the last untrusted proxy from the Forwarded-Headers or the
-     * X-Forwarded-*-Headers.
-     *
-     * @return the remote address
-     */
-    String remoteAddress();
-
-    /**
      * @return true if the client is using SSL
      */
     boolean secure();
@@ -460,14 +450,6 @@ public class Http {
      * @return The request charset, which comes from the content type header, if it exists.
      */
     Optional<String> charset();
-
-    /**
-     * The X509 certificate chain presented by a client during SSL requests.
-     *
-     * @return The chain of X509Certificates used for the request if the request is secure and the
-     *     server supports it.
-     */
-    Optional<List<X509Certificate>> clientCertificateChain();
 
     /**
      * Create a new version of this object with the given transient language set. The transient
@@ -1322,50 +1304,6 @@ public class Http {
     public RequestBuilder session(Map<String, String> data) {
       play.api.mvc.Session session = new play.api.mvc.Session(Scala.asScala(data));
       attr(new TypedKey<>(RequestAttrKey.Session()), new AssignedCell<>(session));
-      return this;
-    }
-
-    /**
-     * @return the remote address
-     */
-    public String remoteAddress() {
-      return req.connection().remoteAddressString();
-    }
-
-    /**
-     * @param remoteAddress sets the remote address
-     * @return the builder instance
-     */
-    public RequestBuilder remoteAddress(String remoteAddress) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  remoteAddress,
-                  req.connection().secure(),
-                  req.connection().clientCertificateChain()));
-      return this;
-    }
-
-    /**
-     * @return the client X509Certificates if they have been set
-     */
-    public Optional<List<X509Certificate>> clientCertificateChain() {
-      return OptionConverters.toJava(req.connection().clientCertificateChain())
-          .map(list -> new ArrayList<>(Scala.asJava(list)));
-    }
-
-    /**
-     * @param clientCertificateChain sets the X509Certificates to use
-     * @return the builder instance
-     */
-    public RequestBuilder clientCertificateChain(List<X509Certificate> clientCertificateChain) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  req.connection().remoteAddress(),
-                  req.connection().secure(),
-                  OptionConverters.toScala(
-                      Optional.ofNullable(Scala.asScala(clientCertificateChain)))));
       return this;
     }
 

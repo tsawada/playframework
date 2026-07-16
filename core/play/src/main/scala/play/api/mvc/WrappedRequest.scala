@@ -5,7 +5,6 @@
 package play.api.mvc
 
 import play.api.libs.typedmap.TypedMap
-import play.api.mvc.request.RemoteConnection
 import play.api.mvc.request.RequestTarget
 
 /**
@@ -16,7 +15,6 @@ import play.api.mvc.request.RequestTarget
  * methods.
  */
 class WrappedRequest[+A](request: Request[A]) extends Request[A] {
-  override def connection: RemoteConnection = request.connection
   override def method: String               = request.method
   override def target: RequestTarget        = request.target
   override def version: String              = request.version
@@ -31,8 +29,6 @@ class WrappedRequest[+A](request: Request[A]) extends Request[A] {
   protected def newWrapper[B](newRequest: Request[B]): WrappedRequest[B] =
     new WrappedRequest[B](newRequest)
 
-  override def withConnection(newConnection: RemoteConnection): WrappedRequest[A] =
-    newWrapper(request.withConnection(newConnection))
   override def withMethod(newMethod: String): WrappedRequest[A] =
     newWrapper(request.withMethod(newMethod))
   override def withTarget(newTarget: RequestTarget): WrappedRequest[A] =

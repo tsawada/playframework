@@ -4,7 +4,6 @@
 
 package play.api.mvc
 
-import java.security.cert.X509Certificate
 import java.util.Locale
 
 import scala.annotation.implicitNotFound
@@ -25,14 +24,6 @@ import play.api.mvc.request._
 @implicitNotFound("Cannot find any HTTP Request Header here")
 trait RequestHeader {
   top =>
-
-  /**
-   * The remote connection that made the request.
-   */
-  def connection: RemoteConnection
-
-  def withConnection(newConnection: RemoteConnection): RequestHeader =
-    new RequestHeaderImpl(newConnection, method, target, version, headers, attrs)
 
   /**
    * The request id. The request id is stored as an attribute indexed by [[play.api.mvc.request.RequestAttrKey.Id]].
@@ -106,25 +97,9 @@ trait RequestHeader {
     new RequestHeaderImpl(connection, method, target, version, newHeaders, attrs)
 
   /**
-   * The client IP address.
-   *
-   * retrieves the last untrusted proxy
-   * from the Forwarded-Headers or the X-Forwarded-*-Headers.
-   *
-   * This method delegates to `connection.remoteAddressString`.
-   */
-  final def remoteAddress: String = connection.remoteAddressString
-
-  /**
    * Is the client using SSL? This method delegates to `connection.secure`.
    */
   final def secure: Boolean = connection.secure
-
-  /**
-   * The X509 certificate chain presented by a client during SSL requests.  This method is
-   * equivalent to `connection.clientCertificateChain`.
-   */
-  final def clientCertificateChain: Option[Seq[X509Certificate]] = connection.clientCertificateChain
 
   /**
    * A map of typed attributes associated with the request.

@@ -5,7 +5,6 @@
 package play.api.test
 
 import java.net.URI
-import java.security.cert.X509Certificate
 
 import scala.xml.NodeSeq
 
@@ -34,7 +33,6 @@ case class FakeHeaders(data: Seq[(String, String)] = Seq.empty) extends Headers(
  * @tparam A the body content type.
  */
 class FakeRequest[+A](request: Request[A]) extends Request[A] {
-  override def connection: RemoteConnection = request.connection
   override def method: String               = request.method
   override def target: RequestTarget        = request.target
   override def version: String              = request.version
@@ -42,8 +40,6 @@ class FakeRequest[+A](request: Request[A]) extends Request[A] {
   override def body: A                      = request.body
   override def attrs: TypedMap              = request.attrs
 
-  override def withConnection(newConnection: RemoteConnection): FakeRequest[A] =
-    new FakeRequest(request.withConnection(newConnection))
   override def withMethod(newMethod: String): FakeRequest[A] =
     new FakeRequest(request.withMethod(newMethod))
   override def withTarget(newTarget: RequestTarget): FakeRequest[A] =
@@ -184,41 +180,4 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
     )
   }
 
-  /**
-   * @tparam A The body type.
-   * @param method The request HTTP method.
-   * @param uri The request uri.
-   * @param headers The request HTTP headers.
-   * @param body The request body.
-   * @param remoteAddress The client IP.
-   */
-  def apply[A](
-      method: String,
-      uri: String,
-      headers: Headers,
-      body: A,
-      remoteAddress: String = "127.0.0.1",
-      version: String = "HTTP/1.1",
-      id: Long = 666,
-      secure: Boolean = false,
-      clientCertificateChain: Option[Seq[X509Certificate]] = None,
-      attrs: TypedMap = TypedMap.empty
-  ): FakeRequest[A] = {
-    val _uri                = uri
-    val request: Request[A] = requestFactory.createRequest(
-      RemoteConnection(remoteAddress, secure, clientCertificateChain),
-      method,
-      new RequestTarget {
-        override lazy val uri: URI                           = new URI(uriString)
-        override def uriString: String                       = _uri
-        override lazy val path: String                       = uriString.split('?').take(1).mkString
-        override lazy val queryMap: Map[String, Seq[String]] = FormUrlEncodedParser.parse(queryString)
-      },
-      version,
-      headers,
-      attrs.updated(RequestAttrKey.Id -> id),
-      body
-    )
-    new FakeRequest(request)
-  }
 }

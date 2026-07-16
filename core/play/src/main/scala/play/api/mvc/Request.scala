@@ -77,8 +77,6 @@ trait Request[+A] extends RequestHeader {
   def map[B](f: A => B): Request[B] = withBody(f(body))
 
   // Override the return type and default implementation of these RequestHeader methods
-  override def withConnection(newConnection: RemoteConnection): Request[A] =
-    new RequestImpl[A](newConnection, method, target, version, headers, attrs, body)
   override def withMethod(newMethod: String): Request[A] =
     new RequestImpl[A](connection, newMethod, target, version, headers, attrs, body)
   override def withTarget(newTarget: RequestTarget): Request[A] =

@@ -198,8 +198,7 @@ class RequestHeaderImpl(header: RequestHeader) extends JRequestHeader {
   override def uri: String           = header.uri
   override def method: String        = header.method
   override def version: String       = header.version
-  override def remoteAddress: String = header.remoteAddress
-  override def secure: Boolean       = header.secure
+  override def secure: Boolean = header.secure
 
   override def attrs: TypedMap                                                                   = new TypedMap(header.attrs)
   override def withAttrs(newAttrs: TypedMap): JRequestHeader                                     = header.withAttrs(newAttrs.asScala).asJava
@@ -225,8 +224,6 @@ class RequestHeaderImpl(header: RequestHeader) extends JRequestHeader {
   override def accepts(mediaType: String): Boolean = header.accepts(mediaType)
 
   override def cookies = JavaHelpers.cookiesToJavaCookies(header.cookies)
-
-  override def clientCertificateChain() = header.clientCertificateChain.map(_.asJava).toJava
 
   @deprecated
   override def getQueryString(key: String): String = {
