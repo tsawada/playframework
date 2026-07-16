@@ -5,12 +5,14 @@
 package play.core.server.common
 
 import java.net.InetAddress
+import java.util.regex.Pattern
 
 import scala.annotation.tailrec
 
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.Scheme
+import play.api.http.HeaderNames
 import play.api.mvc.Headers
 import play.api.Configuration
 import play.api.Logger
@@ -43,7 +45,7 @@ import ForwardedHeaderHandler._
  * <dl>
  *   <dt>play.http.forwarded.version</dt>
  *   <dd>
- *     The version of the forwarded headers ist uses to parse the headers. It can be
+ *     The version of the forwarded headers it uses to parse the headers. It can be
  *     <code>x-forwarded</code> for legacy headers or
  *     <code>rfc7239</code> for the definition from the RFC 7239 <br>
  *     Default is x-forwarded.
@@ -60,6 +62,21 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
 
   /** Update selected remote, scheme, and authority metadata from trusted forwarding headers. */
   def forwardedRequest(
+      rawRemote: RemoteInfo,
+      headers: Headers,
+      scheme: Scheme,
+      authority: Option[RequestAuthority]
+  ): ParsedForwarding = {
+    // Forwarding metadata cannot affect a request from an untrusted direct peer,
+    // so avoid parsing attacker-controlled header lists that will be discarded.
+    if (rawRemote.ipAddress.exists(configuration.isTrustedProxy)) {
+      parse(rawRemote, headers, scheme, authority)
+    } else {
+      ParsedForwarding(rawRemote, scheme, authority)
+    }
+  }
+
+  private def parse(
       rawRemote: RemoteInfo,
       headers: Headers,
       scheme: Scheme,
@@ -94,7 +111,8 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
 }
 
 private[server] object ForwardedHeaderHandler {
-  private val logger = Logger(getClass)
+  private val logger              = Logger(getClass)
+  private val XForwardedSeparator = Pattern.compile(",\\s*")
 
   /**
    * The version of headers that this Play application understands.
@@ -102,8 +120,6 @@ private[server] object ForwardedHeaderHandler {
   sealed trait ForwardedHeaderVersion
   case object Rfc7239    extends ForwardedHeaderVersion
   case object Xforwarded extends ForwardedHeaderVersion
-
-  type HeaderParser = Headers => Seq[ForwardedEntry]
 
   /**
    * An unparsed address and protocol pair from a forwarded header. Both values are
@@ -127,10 +143,11 @@ private[server] object ForwardedHeaderHandler {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
     /**
-     * Removes surrounding quotes if present, otherwise returns original string.
-     * Not RFC compliant. To be compliant we need proper header field parsing.
+     * Removes surrounding quotes from legacy X-Forwarded values if present.
+     * X-Forwarded headers have no common field-value grammar, so their established
+     * permissive handling remains separate from the strict RFC 7239 parser.
      */
-    private def unquote(s: String): String = {
+    private def stripQuotes(s: String): String = {
       if (s.length >= 2 && s.charAt(0) == '"' && s.charAt(s.length - 1) == '"') {
         s.substring(1, s.length - 1)
       } else s
@@ -139,38 +156,38 @@ private[server] object ForwardedHeaderHandler {
     /**
      * Parse any Forward or X-Forwarded-* headers into a sequence of ForwardedEntry
      * objects. Each object a pair with an optional unparsed address and an
-     * optional unparsed protocol. Further parsing may happen later, see `remoteConnection`.
+     * optional unparsed protocol. Parameter-specific parsing happens while the
+     * trusted proxy chain is scanned.
      */
     def forwardedHeaders(headers: Headers): Seq[ForwardedEntry] = version match {
       case Rfc7239 => {
-        val params = for {
-          fhs <- headers.getAll("Forwarded")
-          fh  <- fhs.split(",\\s*")
-        } yield fh
-          .split(";")
-          .iterator
-          .flatMap {
-            _.span(_ != '=') match {
-              case (_, "") => Option.empty[(String, String)] // no value
-
-              case (rawName, v) => {
-                // Remove surrounding quotes
-                val name  = rawName.toLowerCase(java.util.Locale.ENGLISH)
-                val value = unquote(v.tail)
-
-                Some(name -> value)
+        val headerValues = headers.getAll("Forwarded")
+        val entries      = headerValues.flatMap { headerValue =>
+          Rfc7239HeaderParser.parse(headerValue) match {
+            case Right(elements) =>
+              elements.map { paramMap =>
+                ForwardedEntry(paramMap.get("for"), paramMap.get("proto"))
               }
-            }
+            case Left(error) =>
+              logger.debug(s"Invalid RFC 7239 Forwarded header, treating it as untrusted: $error")
+              Seq(ForwardedEntry(None, None))
           }
-          .toMap
-
-        params.map { (paramMap: Map[String, String]) => ForwardedEntry(paramMap.get("for"), paramMap.get("proto")) }
+        }
+        // Forwarded uses 1#forwarded-element, so the combined field value must
+        // contain an element even though empty HTTP list members are ignored.
+        if (headerValues.nonEmpty && entries.isEmpty) Seq(ForwardedEntry(None, None)) else entries
       }
 
       case Xforwarded =>
-        def h(h: Headers, key: String) = h.getAll(key).flatMap(s => s.split(",\\s*")).map(unquote)
-        val forHeaders                 = h(headers, "X-Forwarded-For")
-        val protoHeaders               = h(headers, "X-Forwarded-Proto")
+        def h(h: Headers, key: String): Vector[String] =
+          h.getAll(key)
+            .iterator
+            .flatMap(value => XForwardedSeparator.split(value).iterator)
+            .map(_.trim)
+            .map(stripQuotes)
+            .toVector
+        val forHeaders   = h(headers, HeaderNames.X_FORWARDED_FOR)
+        val protoHeaders = h(headers, HeaderNames.X_FORWARDED_PROTO)
         if (forHeaders.length == protoHeaders.length) {
           forHeaders.lazyZip(protoHeaders).map { (f, p) =>
             ForwardedEntry(Some(f), Some(p))
