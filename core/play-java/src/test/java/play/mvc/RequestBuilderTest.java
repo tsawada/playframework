@@ -11,6 +11,8 @@ import static org.junit.Assert.*;
 import com.google.common.net.InetAddresses;
 import java.io.File;
 import java.io.IOException;
+import java.math.BigInteger;
+import java.net.Inet6Address;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,6 +39,65 @@ import play.mvc.Http.RequestBuilder;
 import play.test.Helpers;
 
 public class RequestBuilderTest {
+
+  @Test
+  public void testSchemeAndAuthorityValueTypes() throws Exception {
+    Http.Scheme customScheme = new Http.Scheme("Git+SSH.v1-2");
+    assertEquals("git+ssh.v1-2", customScheme.render());
+    assertEquals(customScheme, customScheme.asScala().asJava());
+    assertFalse(customScheme.isSecure());
+    assertEquals(Http.Scheme.HTTPS, new Http.Scheme("HTTPS"));
+
+    Http.RequestAuthority registered = Http.RequestAuthority.parse("EXAMPLE.%63om:00080");
+    Http.RequestAuthority ipv4 = Http.RequestAuthority.parse("192.0.2.43:8080");
+    Http.RequestAuthority ipv6 = Http.RequestAuthority.parse("[2001:0DB8::1]:443");
+    Http.RequestAuthority mappedIpv6 = Http.RequestAuthority.parse("[::ffff:192.0.2.43]");
+    Http.RequestAuthority ipvFuture = Http.RequestAuthority.parse("[VF.FOO:BAR]:8443");
+    Http.RequestAuthority lowerIpvFuture = Http.RequestAuthority.parse("[vf.foo:bar]:8443");
+
+    assertEquals("example.com:80", registered.render());
+    assertTrue(registered.host() instanceof Http.AuthorityHost.RegName);
+    assertTrue(ipv4.host() instanceof Http.AuthorityHost.IPv4);
+    assertEquals("192.0.2.43:8080", ipv4.render());
+    assertTrue(ipv6.host() instanceof Http.AuthorityHost.IPv6);
+    assertEquals("[2001:db8::1]:443", ipv6.render());
+    assertTrue(mappedIpv6.host() instanceof Http.AuthorityHost.IPv6);
+    assertEquals("[::ffff:c000:22b]", mappedIpv6.render());
+    assertTrue(ipvFuture.host() instanceof Http.AuthorityHost.IPvFuture);
+    assertEquals("[vf.foo:bar]:8443", ipvFuture.render());
+    assertEquals(lowerIpvFuture, ipvFuture);
+    assertEquals(lowerIpvFuture.host(), ipvFuture.host());
+    assertEquals(lowerIpvFuture.hashCode(), ipvFuture.hashCode());
+    assertEquals(lowerIpvFuture.host().hashCode(), ipvFuture.host().hashCode());
+
+    for (Http.RequestAuthority authority : List.of(registered, ipv4, ipv6, mappedIpv6, ipvFuture)) {
+      assertEquals(authority, authority.asScala().asJava());
+      assertEquals(authority.host().render(), authority.host().toString());
+      assertEquals(authority.render(), authority.toString());
+    }
+
+    Http.AuthorityPort huge =
+        new Http.AuthorityPort(new BigInteger("123456789012345678901234567890"));
+    assertEquals(Optional.of(0), new Http.AuthorityPort(BigInteger.ZERO).tcpPort());
+    assertEquals(Optional.of(65535), new Http.AuthorityPort(BigInteger.valueOf(65535)).tcpPort());
+    assertEquals(Optional.empty(), new Http.AuthorityPort(BigInteger.valueOf(65536)).tcpPort());
+    assertEquals(Optional.empty(), huge.tcpPort());
+    assertEquals(huge, huge.asScala().asJava());
+    assertEquals("example.com:" + huge.render(), registered.withPort(Optional.of(huge)).render());
+
+    for (String invalid :
+        List.of("[fe80::1%1]", "[fe80::1%eth0]", "[fe80::1%25eth0]", "１２７.０.０.１", "١٢٧.٠.٠.١")) {
+      assertThatThrownBy(() -> Http.RequestAuthority.parse(invalid))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    Inet6Address unscoped = (Inet6Address) InetAddresses.forString("fe80::1");
+    for (int scope : List.of(0, 1)) {
+      Inet6Address scoped = Inet6Address.getByAddress(null, unscoped.getAddress(), scope);
+      assertThatThrownBy(() -> new Http.AuthorityHost.IPv6(scoped))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
 
   @Test
   public void testRemoteInfoValueTypes() {

@@ -10,6 +10,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -238,6 +241,193 @@ public class Http {
     public play.api.mvc.request.TransportConnection asScala() {
       return play.api.mvc.request.TransportConnection$.MODULE$.create(
           peer.asScala(), OptionConverters.toScala(tls.map(TransportTls::asScala)));
+    }
+  }
+
+  /** A normalized URI scheme. */
+  public record Scheme(String value) {
+    public static final Scheme HTTP = new Scheme("http");
+    public static final Scheme HTTPS = new Scheme("https");
+
+    public Scheme {
+      value = play.api.mvc.request.Scheme$.MODULE$.create(value).value();
+    }
+
+    public boolean isSecure() {
+      return value.equals("https");
+    }
+
+    public String render() {
+      return value;
+    }
+
+    public play.api.mvc.request.Scheme asScala() {
+      return play.api.mvc.request.Scheme$.MODULE$.create(value);
+    }
+
+    @Override
+    public String toString() {
+      return render();
+    }
+  }
+
+  /** A typed, normalized URI host. */
+  public sealed interface AuthorityHost
+      permits AuthorityHost.RegName,
+          AuthorityHost.IPv4,
+          AuthorityHost.IPv6,
+          AuthorityHost.IPvFuture {
+
+    String render();
+
+    play.api.mvc.request.AuthorityHost asScala();
+
+    record RegName(String value) implements AuthorityHost {
+      public RegName {
+        value = play.api.mvc.request.AuthorityHost$.MODULE$.regName(value).value();
+      }
+
+      @Override
+      public String render() {
+        return value;
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.regName(value);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPv4(Inet4Address address) implements AuthorityHost {
+      public IPv4 {
+        Objects.requireNonNull(address, "address");
+      }
+
+      @Override
+      public String render() {
+        return asScala().render();
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipv4(address);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPv6(Inet6Address address) implements AuthorityHost {
+      public IPv6 {
+        Objects.requireNonNull(address, "address");
+        play.api.mvc.request.AuthorityHost$.MODULE$.ipv6(address);
+      }
+
+      @Override
+      public String render() {
+        return asScala().render();
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipv6(address);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPvFuture(String value) implements AuthorityHost {
+      public IPvFuture {
+        value = play.api.mvc.request.AuthorityHost$.MODULE$.ipvFuture(value).value();
+      }
+
+      @Override
+      public String render() {
+        return "[" + value + "]";
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipvFuture(value);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+  }
+
+  /** An arbitrary non-negative decimal URI port. */
+  public record AuthorityPort(BigInteger value) {
+    private static final BigInteger MAX_TCP_PORT = BigInteger.valueOf(65535);
+
+    public AuthorityPort {
+      Objects.requireNonNull(value, "value");
+      if (value.signum() < 0) {
+        throw new IllegalArgumentException("An authority port must not be negative");
+      }
+    }
+
+    public static AuthorityPort parse(String value) {
+      return play.api.mvc.request.AuthorityPort$.MODULE$.parseOrThrow(value).asJava();
+    }
+
+    public Optional<Integer> tcpPort() {
+      return value.compareTo(MAX_TCP_PORT) <= 0 ? Optional.of(value.intValue()) : Optional.empty();
+    }
+
+    public String render() {
+      return value.toString();
+    }
+
+    public play.api.mvc.request.AuthorityPort asScala() {
+      return play.api.mvc.request.AuthorityPort$.MODULE$.create(value);
+    }
+
+    @Override
+    public String toString() {
+      return render();
+    }
+  }
+
+  /** A normalized request destination authority. */
+  public record RequestAuthority(AuthorityHost host, Optional<AuthorityPort> port) {
+    public RequestAuthority {
+      Objects.requireNonNull(host, "host");
+      Objects.requireNonNull(port, "port");
+    }
+
+    public static RequestAuthority parse(String value) {
+      return play.api.mvc.request.RequestAuthority$.MODULE$.parseOrThrow(value).asJava();
+    }
+
+    public String render() {
+      return host.render() + port.map(value -> ":" + value.render()).orElse("");
+    }
+
+    public RequestAuthority withPort(Optional<AuthorityPort> port) {
+      return new RequestAuthority(host, port);
+    }
+
+    public play.api.mvc.request.RequestAuthority asScala() {
+      return play.api.mvc.request.RequestAuthority$.MODULE$.create(
+          host.asScala(), OptionConverters.toScala(port.map(AuthorityPort::asScala)));
+    }
+
+    @Override
+    public String toString() {
+      return render();
     }
   }
 
