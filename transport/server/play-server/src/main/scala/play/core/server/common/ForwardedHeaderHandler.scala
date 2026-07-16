@@ -9,6 +9,7 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 
 import play.api.http.HeaderNames
+import play.api.mvc.request.AuthorityPort
 import play.api.mvc.request.ForwardingInfo
 import play.api.mvc.request.ForwardingSource
 import play.api.mvc.request.NodePort
@@ -93,6 +94,12 @@ import ForwardedHeaderHandler._
  *   <dd>
  *     Whether one X-Forwarded-Proto value may update the effective scheme
  *     without a forwarded identity.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustXForwardedPort</dt>
+ *   <dd>
+ *     Whether one trusted <code>X-Forwarded-Port</code> value replaces the port
+ *     in the effective request host. This only applies when using
+ *     <code>x-forwarded</code>.
  *   </dd>
  *   <dt>play.http.forwarded.trustXForwardedHost</dt>
  *   <dd>
@@ -263,6 +270,7 @@ private[server] object ForwardedHeaderHandler {
       trustSingleXForwardedProto: Boolean = false,
       trustForwardedHost: Boolean = false,
       trustXForwardedProtoWithoutXForwardedFor: Boolean = false,
+      trustXForwardedPort: Boolean = false,
       trustXForwardedHost: Boolean = false,
       trustXForwardedSsl: Boolean = false
   ) {
@@ -433,16 +441,32 @@ private[server] object ForwardedHeaderHandler {
         .flatMap(usableForwardedAuthority)
     }
 
-    /** Apply trusted X-Forwarded-Host metadata to the effective request authority. */
+    /** Apply trusted X-Forwarded authority metadata to the effective request host. */
     def xForwardedAuthority(
         remote: RemoteInfo,
         headers: Headers,
         authority: Option[RequestAuthority]
     ): Option[RequestAuthority] = {
-      if (version == Xforwarded && trustXForwardedHost && isTrustedProxy(remote.node)) {
-        singleXForwardedValue(headers, HeaderNames.X_FORWARDED_HOST)
+      if (
+        version == Xforwarded &&
+        (trustXForwardedHost || trustXForwardedPort) &&
+        isTrustedProxy(remote.node)
+      ) {
+        val forwardedHost = Option
+          .when(trustXForwardedHost)(singleXForwardedValue(headers, HeaderNames.X_FORWARDED_HOST))
+          .flatten
           .flatMap(usableForwardedAuthority)
-          .orElse(authority)
+        val forwardedPort = Option
+          .when(trustXForwardedPort)(singleXForwardedValue(headers, HeaderNames.X_FORWARDED_PORT))
+          .flatten
+          .flatMap(parseXForwardedPort)
+
+        (forwardedHost, forwardedPort) match {
+          case (Some(value), Some(port)) => Some(value.withPort(Some(port)))
+          case (Some(value), None)       => Some(value)
+          case (None, Some(port))        => authority.map(_.withPort(Some(port)))
+          case (None, None)              => authority
+        }
       } else {
         authority
       }
@@ -461,6 +485,8 @@ private[server] object ForwardedHeaderHandler {
         case _                            => None
       }
     }
+
+    private def parseXForwardedPort(value: String): Option[AuthorityPort] = AuthorityPort.parse(value).toOption
 
     private def xForwardedSslProto(headers: Headers): Option[String] = {
       singleXForwardedValue(headers, XForwardedSsl).flatMap {
@@ -524,6 +550,7 @@ private[server] object ForwardedHeaderHandler {
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
         config.getOptional[Boolean]("trustForwardedHost").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false),
+        config.getOptional[Boolean]("trustXForwardedPort").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedHost").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedSsl").getOrElse(false)
       )

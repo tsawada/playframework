@@ -11,6 +11,7 @@ import play.api.test._
 import play.api.Configuration
 import play.api.Mode
 import play.core.server.ServerConfig
+import play.filters.hosts.AllowedHostsFilter
 import play.it._
 
 class NettyRequestHeadersSpec extends RequestHeadersSpec with NettyIntegrationSpecification {
@@ -88,6 +89,7 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       play.api.test.TestServer(
         serverConfig,
         GuiceApplicationBuilder()
+          .configure(configuration*)
           .appRoutes { app =>
             val Action = app.injector.instanceOf[DefaultActionBuilder]
             val parse  = app.injector.instanceOf[PlayBodyParsers]
@@ -656,6 +658,48 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "use trusted x-forwarded authority metadata throughout the request" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"                                  -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedHost"                      -> true,
+        "play.http.forwarded.trustXForwardedPort"                      -> true,
+        "play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor" -> true
+      )((Action, _) =>
+        Action { request =>
+          val absoluteUrl  = Call("GET", "/result").absoluteURL()(using request)
+          val webSocketUrl = Call("GET", "/socket").webSocketURL()(using request)
+          Results.Ok(
+            Seq(
+              request.host,
+              request.asJava.host,
+              request.headers(HOST),
+              absoluteUrl,
+              webSocketUrl
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "https://localhost/path",
+            "HTTP/1.1",
+            Map(
+              "X-Forwarded-Host"  -> "public.example:7000",
+              "X-Forwarded-Port"  -> "8443",
+              "X-Forwarded-Proto" -> "https"
+            ),
+            ""
+          )
+        )
+
+        response.body must beLeft(
+          "public.example:8443|public.example:8443|public.example:8443|" +
+            "https://public.example:8443/result|wss://public.example:8443/socket"
+        )
+      }
+    }
+
     "validate the trusted x-forwarded-host with the allowed hosts filter" in {
       withServerAndConfig(
         "play.http.forwarded.version"             -> "x-forwarded",
@@ -691,6 +735,105 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
             "/path",
             "HTTP/1.1",
             Map("X-Forwarded-Host" -> "public.example"),
+            ""
+          )
+        )
+
+        response.status must_== BAD_REQUEST
+      }
+    }
+
+    "use a trusted x-forwarded-port throughout the effective request authority" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"                                  -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedPort"                      -> true,
+        "play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor" -> true
+      )((Action, _) =>
+        Action { request =>
+          val absoluteUrl  = Call("GET", "/result").absoluteURL()(using request)
+          val webSocketUrl = Call("GET", "/socket").webSocketURL()(using request)
+          Results.Ok(
+            Seq(
+              request.host,
+              request.asJava.host,
+              request.headers(HOST),
+              absoluteUrl,
+              webSocketUrl
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "https://localhost/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Port" -> "8443", "X-Forwarded-Proto" -> "https"),
+            ""
+          )
+        )
+
+        response.body must beLeft(
+          "localhost:8443|localhost:8443|localhost:8443|" +
+            "https://localhost:8443/result|wss://localhost:8443/socket"
+        )
+      }
+    }
+
+    "apply x-forwarded-port to an absolute target with a query and no path" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedPort" -> true
+      )((Action, _) => Action { request => Results.Ok(s"${request.host}|${request.headers(HOST)}") }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://localhost?x=1",
+            "HTTP/1.1",
+            Map("X-Forwarded-Port" -> "8443"),
+            ""
+          )
+        )
+
+        response.body must beLeft("localhost:8443|localhost:8443")
+      }
+    }
+
+    "validate the trusted x-forwarded-port with the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedPort" -> true,
+        "play.filters.enabled"                    -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"              -> Seq("localhost:8443")
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://localhost/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Port" -> "8443"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("localhost:8443")
+      }
+    }
+
+    "reject an effective x-forwarded-port not accepted by the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedPort" -> true,
+        "play.filters.enabled"                    -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"              -> Seq("localhost:9000")
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://localhost/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Port" -> "8443"),
             ""
           )
         )

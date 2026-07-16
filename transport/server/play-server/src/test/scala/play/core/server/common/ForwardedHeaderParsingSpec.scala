@@ -71,6 +71,7 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
             version = Xforwarded,
             trustedProxies = List.empty,
             trustXForwardedProtoWithoutXForwardedFor = true,
+            trustXForwardedPort = true,
             trustXForwardedHost = true,
             trustXForwardedSsl = true
           ),
@@ -78,6 +79,7 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
             "X-Forwarded-For"   -> "???",
             "X-Forwarded-Proto" -> "1https",
             "X-Forwarded-Host"  -> "user@public.example",
+            "X-Forwarded-Port"  -> "-1",
             "X-Forwarded-Ssl"   -> "invalid"
           )
         )
