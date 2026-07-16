@@ -20,6 +20,7 @@ import play.api.mvc.request.NodePort
 import play.api.mvc.request.PeerEndpoint
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RemoteNode
+import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.Scheme
 import play.api.mvc.request.TransportConnection
 import play.api.mvc.request.TransportTls
@@ -279,6 +280,37 @@ class HelpersSpec extends Specification {
         request.transport mustEqual transport
         request.remote mustEqual remote
         request.scheme mustEqual scheme
+      }
+
+      "synchronize Host header helpers with the effective authority" in {
+        val fromHeaders = FakeRequest().withHeaders(Headers("host" -> "EXAMPLE.com:00080", "X-Test" -> "one"))
+
+        fromHeaders.authority must beSome(RequestAuthority.parseOrThrow("example.com:80"))
+        fromHeaders.host mustEqual "example.com:80"
+        fromHeaders.headers.getAll("Host") must contain(exactly("example.com:80"))
+        fromHeaders.headers.get("X-Test") must beSome("one")
+
+        val fromPairs = fromHeaders.withHeaders("HOST" -> "[2001:0DB8::1]:00443")
+        fromPairs.authority must beSome(RequestAuthority.parseOrThrow("[2001:db8::1]:443"))
+        fromPairs.host mustEqual "[2001:db8::1]:443"
+        fromPairs.headers.getAll("Host") must contain(exactly("[2001:db8::1]:443"))
+
+        val withoutHost = fromPairs.withHeaders(Headers("X-Test" -> "two"))
+        withoutHost.authority mustEqual fromPairs.authority
+        withoutHost.headers.getAll("Host") must contain(exactly("[2001:db8::1]:443"))
+
+        val typed = withoutHost.withAuthority(Some(RequestAuthority.parseOrThrow("TYPED.example:00444")))
+        typed.host mustEqual "typed.example:444"
+        typed.headers.getAll("Host") must contain(exactly("typed.example:444"))
+      }
+
+      "reject duplicate and invalid Host values in header helpers" in {
+        FakeRequest().withHeaders(Headers("Host" -> "one.example", "host" -> "two.example")) must
+          throwA[IllegalArgumentException]
+        FakeRequest().withHeaders("Host" -> "one.example", "HOST" -> "two.example") must
+          throwA[IllegalArgumentException]
+        FakeRequest().withHeaders(Headers("Host" -> "[invalid")) must throwA[IllegalArgumentException]
+        FakeRequest().withHeaders("host" -> "[invalid") must throwA[IllegalArgumentException]
       }
 
       "successfully execute a POST request with an empty body" in {

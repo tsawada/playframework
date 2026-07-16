@@ -66,8 +66,34 @@ class FakeRequest[+A](request: Request[A]) extends Request[A] {
     new FakeRequest(request.withTarget(newTarget))
   override def withVersion(newVersion: String): FakeRequest[A] =
     new FakeRequest(request.withVersion(newVersion))
-  override def withHeaders(newHeaders: Headers): FakeRequest[A] =
-    new FakeRequest(request.withHeaders(newHeaders))
+
+  /**
+   * Constructs a new request with the given headers.
+   *
+   * Unlike the core `Request.withHeaders` operation, this test helper treats exactly one `Host` value as a
+   * convenience authority replacement. The value is parsed and exposed canonically through both
+   * [[play.api.mvc.RequestHeader.authority]] and the `Host` header. Duplicate or invalid `Host` values are rejected.
+   */
+  override def withHeaders(newHeaders: Headers): FakeRequest[A] = {
+    val hostValues = newHeaders.getAll(HeaderNames.HOST)
+    if (hostValues.sizeIs > 1) {
+      throw new IllegalArgumentException(
+        "FakeRequest.withHeaders cannot set duplicate Host headers; use withAuthority to replace the effective authority"
+      )
+    }
+
+    hostValues.headOption match {
+      case Some(host) =>
+        val newAuthority = RequestAuthority.parseOrThrow(host)
+        new FakeRequest(
+          request
+            .withAuthority(Some(newAuthority))
+            .withHeaders(newHeaders.remove(HeaderNames.HOST))
+        )
+      case None =>
+        new FakeRequest(request.withHeaders(newHeaders))
+    }
+  }
   override def withAttrs(attrs: TypedMap): FakeRequest[A] =
     new FakeRequest(request.withAttrs(attrs))
   override def withBody[B](body: B): FakeRequest[B] =
@@ -75,6 +101,9 @@ class FakeRequest[+A](request: Request[A]) extends Request[A] {
 
   /**
    * Constructs a new request with additional headers. Any existing headers of the same name will be replaced.
+   *
+   * Supplying exactly one `Host` value replaces the effective authority and canonicalizes the resulting `Host`
+   * header. Duplicate or invalid `Host` values are rejected.
    */
   def withHeaders(newHeaders: (String, String)*): FakeRequest[A] = {
     withHeaders(headers.replace(newHeaders*))

@@ -298,36 +298,59 @@ public class RequestBuilderTest {
   public void testAuthorityIsTheCanonicalHostState() {
     RequestBuilder builder = new RequestBuilder().host("EXAMPLE.com:00080");
     Http.Headers withoutHost = new Http.Headers(Map.of("X-Test", Collections.singletonList("one")));
-    Http.Headers canonicalHost =
-        new Http.Headers(
-            Map.of(Http.HeaderNames.HOST, Collections.singletonList("example.com:80")));
-    Http.Headers conflictingHost =
-        new Http.Headers(Map.of(Http.HeaderNames.HOST, Collections.singletonList("other.example")));
+    Http.Headers replacementHost =
+        new Http.Headers(Map.of("host", Collections.singletonList("OTHER.example:00081")));
     Http.Headers duplicateHost =
         new Http.Headers(
             Map.of(Http.HeaderNames.HOST, List.of("example.com:80", "example.com:80")));
+    Http.Headers emptyHost =
+        new Http.Headers(Map.of(Http.HeaderNames.HOST, Collections.emptyList()));
+    Http.Headers invalidHost =
+        new Http.Headers(Map.of(Http.HeaderNames.HOST, Collections.singletonList("[invalid")));
 
     assertEquals("example.com:80", builder.host());
     assertEquals(Optional.of(Http.RequestAuthority.parse("example.com:80")), builder.authority());
 
     builder.headers(withoutHost);
     assertEquals(Optional.of("example.com:80"), builder.headers().get(Http.HeaderNames.HOST));
-    builder.headers(canonicalHost);
 
-    assertThatThrownBy(() -> builder.headers(conflictingHost))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("withAuthority");
+    builder.headers(replacementHost);
+    assertEquals("other.example:81", builder.host());
+    assertEquals(Optional.of("other.example:81"), builder.headers().get(Http.HeaderNames.HOST));
+
+    builder.header("HOST", "THIRD.example:00082");
+    assertEquals("third.example:82", builder.host());
+    assertEquals(Optional.of("third.example:82"), builder.headers().get(Http.HeaderNames.HOST));
+
+    builder.header("host", Collections.singletonList("[2001:0DB8::1]:00443"));
+    assertEquals("[2001:db8::1]:443", builder.host());
+    assertEquals(Optional.of("[2001:db8::1]:443"), builder.headers().get(Http.HeaderNames.HOST));
+
     assertThatThrownBy(() -> builder.headers(duplicateHost))
         .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("duplicate Host");
+        .hasMessageContaining("exactly one Host");
+    assertThatThrownBy(() -> builder.headers(emptyHost))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("exactly one Host");
+    assertThatThrownBy(() -> builder.headers(invalidHost))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> builder.header("host", "[invalid"))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(
+            () -> builder.header(Http.HeaderNames.HOST, List.of("one.example", "two.example")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("exactly one Host");
+    assertEquals("[2001:db8::1]:443", builder.host());
 
     builder.authority(Optional.empty());
     assertEquals(Optional.empty(), builder.authority());
     assertEquals("", builder.host());
     assertEquals(Optional.empty(), builder.headers().get(Http.HeaderNames.HOST));
-    assertThatThrownBy(() -> builder.headers(canonicalHost))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("withAuthority");
+
+    builder.header("Host", "RESTORED.example:00083");
+    assertEquals(
+        Optional.of(Http.RequestAuthority.parse("restored.example:83")), builder.authority());
+    assertEquals(Optional.of("restored.example:83"), builder.headers().get(Http.HeaderNames.HOST));
 
     builder.authority(Http.RequestAuthority.parse("NEW.example"));
     assertEquals("new.example", builder.host());

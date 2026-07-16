@@ -1781,34 +1781,71 @@ public class Http {
     }
 
     /**
-     * Set the headers to be used by the request builder. This operation cannot change the effective
-     * authority: a missing Host header is restored from {@link #authority()}, while a conflicting
-     * or duplicate Host header is rejected. Use {@link #authority(RequestAuthority)} to change it.
+     * Set the headers to be used by the request builder.
+     *
+     * <p>Supplying exactly one {@code Host} value replaces the effective {@link #authority()} and
+     * canonicalizes the resulting {@code Host} header. Duplicate, empty-list, or invalid {@code
+     * Host} values are rejected. If {@code Host} is absent, the existing effective authority is
+     * preserved.
      *
      * @param headers the headers to be replaced
      * @return the builder instance
      */
     public RequestBuilder headers(Headers headers) {
-      req = req.withHeaders(headers.asScala());
+      Objects.requireNonNull(headers, "headers");
+      List<String> hostValues = headers.getAll(HeaderNames.HOST);
+
+      if (headers.contains(HeaderNames.HOST) && hostValues.size() != 1) {
+        throw new IllegalArgumentException(
+            "RequestBuilder.headers requires exactly one Host value; use authority to replace the"
+                + " effective authority");
+      }
+
+      if (hostValues.size() == 1) {
+        RequestAuthority newAuthority = RequestAuthority.parse(hostValues.get(0));
+        String hostHeaderName = actualHeaderName(headers, HeaderNames.HOST);
+        req =
+            req.withAuthority(OptionConverters.toScala(Optional.of(newAuthority.asScala())))
+                .withHeaders(headers.removing(hostHeaderName).asScala());
+      } else {
+        req = req.withHeaders(headers.asScala());
+      }
       return this;
     }
 
     /**
+     * A single case-insensitive {@code Host} value replaces the effective {@link #authority()}.
+     * Multiple or invalid {@code Host} values are rejected.
+     *
      * @param key the key for in the header
      * @param values the values associated with the key
      * @return the builder instance
      */
     public RequestBuilder header(String key, List<String> values) {
+      if (key.equalsIgnoreCase(HeaderNames.HOST)) {
+        Headers currentHeaders = headers();
+        return this.headers(
+            currentHeaders.removing(actualHeaderName(currentHeaders, key)).adding(key, values));
+      }
       return this.headers(headers().adding(key, values));
     }
 
     /**
+     * A case-insensitive {@code Host} key replaces the effective {@link #authority()}.
+     *
      * @param key the key for in the header
      * @param value the value (one) associated with the key
      * @return the builder instance
      */
     public RequestBuilder header(String key, String value) {
-      return this.headers(headers().adding(key, value));
+      return this.header(key, Collections.singletonList(value));
+    }
+
+    private static String actualHeaderName(Headers headers, String name) {
+      return headers.asMap().keySet().stream()
+          .filter(value -> value.equalsIgnoreCase(name))
+          .findFirst()
+          .orElse(name);
     }
 
     /**

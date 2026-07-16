@@ -11,6 +11,7 @@ import scala.xml.NodeSeq
 
 import com.google.common.net.InetAddresses
 import org.apache.pekko.util.ByteString
+import play.api.http.HeaderNames
 import play.api.http.HttpConfiguration
 import play.api.libs.json.JsValue
 import play.api.libs.typedmap.TypedEntry
@@ -61,8 +62,26 @@ class FakeRequest[+A](request: Request[A]) extends Request[A] {
     new FakeRequest(request.withTarget(newTarget))
   override def withVersion(newVersion: String): FakeRequest[A] =
     new FakeRequest(request.withVersion(newVersion))
-  override def withHeaders(newHeaders: Headers): FakeRequest[A] =
-    new FakeRequest(request.withHeaders(newHeaders))
+  override def withHeaders(newHeaders: Headers): FakeRequest[A] = {
+    val hostValues = newHeaders.getAll(HeaderNames.HOST)
+    if (hostValues.sizeIs > 1) {
+      throw new IllegalArgumentException(
+        "FakeRequest.withHeaders cannot set duplicate Host headers; use withAuthority to replace the effective authority"
+      )
+    }
+
+    hostValues.headOption match {
+      case Some(host) =>
+        val newAuthority = RequestAuthority.parseOrThrow(host)
+        new FakeRequest(
+          request
+            .withAuthority(Some(newAuthority))
+            .withHeaders(newHeaders.remove(HeaderNames.HOST))
+        )
+      case None =>
+        new FakeRequest(request.withHeaders(newHeaders))
+    }
+  }
   override def withAttrs(attrs: TypedMap): FakeRequest[A] =
     new FakeRequest(request.withAttrs(attrs))
   override def addAttr[B](key: TypedKey[B], value: B): FakeRequest[A] =
