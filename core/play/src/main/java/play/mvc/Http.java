@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -194,6 +195,327 @@ public class Http {
       newHeaders.putAll(this.headers);
       newHeaders.remove(name);
       return new Headers(newHeaders);
+    }
+  }
+
+  /** The network endpoint directly connected to Play. */
+  public record PeerEndpoint(InetAddress address, Optional<Integer> port) {
+    public PeerEndpoint {
+      Objects.requireNonNull(address, "address");
+      Objects.requireNonNull(port, "port");
+      if (port.isPresent() && (port.get() < 0 || port.get() > 65535)) {
+        throw new IllegalArgumentException(
+            "A direct transport peer port must be between 0 and 65535: " + port.get());
+      }
+    }
+
+    @SuppressWarnings("unchecked")
+    public play.api.mvc.request.PeerEndpoint asScala() {
+      scala.Option<Object> scalaPort =
+          (scala.Option<Object>) (scala.Option<?>) OptionConverters.toScala(port);
+      return play.api.mvc.request.PeerEndpoint$.MODULE$.create(address, scalaPort);
+    }
+  }
+
+  /** TLS metadata observed on the connection directly terminating at Play. */
+  public record TransportTls(List<X509Certificate> peerCertificates) {
+    public TransportTls {
+      peerCertificates = List.copyOf(peerCertificates);
+    }
+
+    public play.api.mvc.request.TransportTls asScala() {
+      return play.api.mvc.request.TransportTls$.MODULE$.create(Scala.asScala(peerCertificates));
+    }
+  }
+
+  /** Immutable metadata about the transport connection directly terminating at Play. */
+  public record TransportConnection(PeerEndpoint peer, Optional<TransportTls> tls) {
+    public TransportConnection {
+      Objects.requireNonNull(peer, "peer");
+      Objects.requireNonNull(tls, "tls");
+    }
+
+    public play.api.mvc.request.TransportConnection asScala() {
+      return play.api.mvc.request.TransportConnection$.MODULE$.create(
+          peer.asScala(), OptionConverters.toScala(tls.map(TransportTls::asScala)));
+    }
+  }
+
+  public sealed interface NodePort permits NodePort.Numeric, NodePort.Obfuscated {
+
+    /**
+     * @return the Scala version of this node port
+     */
+    play.api.mvc.request.NodePort asScala();
+
+    public record Numeric(int value) implements NodePort {
+      public Numeric {
+        if (value < 0 || value > 65535) {
+          throw new IllegalArgumentException(
+              "A numeric node port must be between 0 and 65535: " + value);
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.NodePort asScala() {
+        return play.api.mvc.request.NodePort$.MODULE$.numeric(value);
+      }
+    }
+
+    public record Obfuscated(String value) implements NodePort {
+      public Obfuscated {
+        Objects.requireNonNull(value, "An obfuscated node port must not be null");
+        if (!play.api.mvc.request.NodePort$.MODULE$.isObfuscatedIdentifier(value)) {
+          throw new IllegalArgumentException("Invalid obfuscated node port: '" + value + "'");
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.NodePort asScala() {
+        return play.api.mvc.request.NodePort$.MODULE$.obfuscated(value);
+      }
+    }
+  }
+
+  public sealed interface RemoteNode
+      permits RemoteNode.Ip, RemoteNode.Obfuscated, RemoteNode.Unknown {
+
+    /**
+     * @return the optional numeric or obfuscated port attached to this node
+     */
+    Optional<NodePort> port();
+
+    /**
+     * @return the Scala version of this remote node.
+     */
+    play.api.mvc.request.RemoteNode asScala();
+
+    public record Ip(InetAddress address, Optional<NodePort> port) implements RemoteNode {
+
+      public Ip {
+        Objects.requireNonNull(address, "A remote IP address must not be null");
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        scala.Option<play.api.mvc.request.NodePort> scalaPort =
+            OptionConverters.toScala(port.map(NodePort::asScala));
+        return play.api.mvc.request.RemoteNode$.MODULE$.ip(address, scalaPort);
+      }
+    }
+
+    public record Obfuscated(String identifier, Optional<NodePort> port) implements RemoteNode {
+
+      public Obfuscated {
+        Objects.requireNonNull(identifier, "A remote obfuscated identifier must not be null");
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+        if (!play.api.mvc.request.NodePort$.MODULE$.isObfuscatedIdentifier(identifier)) {
+          throw new IllegalArgumentException(
+              "Invalid obfuscated remote identifier: '" + identifier + "'");
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        return play.api.mvc.request.RemoteNode$.MODULE$.obfuscated(
+            identifier, OptionConverters.toScala(port.map(NodePort::asScala)));
+      }
+    }
+
+    public record Unknown(Optional<NodePort> port) implements RemoteNode {
+
+      public Unknown {
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        return play.api.mvc.request.RemoteNode$.MODULE$.unknown(
+            OptionConverters.toScala(port.map(NodePort::asScala)));
+      }
+    }
+  }
+
+  /** A selected or intermediate endpoint from an accepted forwarding path. */
+  public record RemoteEndpoint(RemoteNode node, Optional<RemoteNode> byNode) {
+
+    public RemoteEndpoint {
+      Objects.requireNonNull(node, "A remote endpoint node must not be null");
+      Objects.requireNonNull(byNode, "A remote endpoint by-node option must not be null");
+    }
+
+    /**
+     * @return the Scala version of this remote endpoint
+     */
+    public play.api.mvc.request.RemoteEndpoint asScala() {
+      return play.api.mvc.request.RemoteEndpoint$.MODULE$.create(
+          node.asScala(), OptionConverters.toScala(byNode.map(RemoteNode::asScala)));
+    }
+  }
+
+  /** The header family from which accepted remote forwarding metadata was derived. */
+  public enum ForwardingSource {
+    /** The standardized RFC 7239 {@code Forwarded} header. */
+    RFC_7239,
+
+    /** The de facto {@code X-Forwarded-*} header family. */
+    X_FORWARDED;
+
+    /**
+     * @return the Scala version of this forwarding source
+     */
+    public play.api.mvc.request.ForwardingSource asScala() {
+      return switch (this) {
+        case RFC_7239 -> play.api.mvc.request.ForwardingSource$.MODULE$.rfc7239();
+        case X_FORWARDED -> play.api.mvc.request.ForwardingSource$.MODULE$.xForwarded();
+      };
+    }
+  }
+
+  /** Accepted forwarding metadata for a selected remote endpoint. */
+  public record ForwardingInfo(ForwardingSource source, List<RemoteEndpoint> via) {
+
+    public ForwardingInfo {
+      Objects.requireNonNull(source, "A forwarding source must not be null");
+      via = List.copyOf(via);
+    }
+
+    /**
+     * @return the Scala version of this forwarding metadata
+     */
+    public play.api.mvc.request.ForwardingInfo asScala() {
+      List<play.api.mvc.request.RemoteEndpoint> scalaVia =
+          via.stream().map(RemoteEndpoint::asScala).toList();
+      return play.api.mvc.request.ForwardingInfo$.MODULE$.create(
+          source.asScala(), Scala.toSeq(scalaVia));
+    }
+  }
+
+  /** Immutable metadata about the selected remote node for a request. */
+  public record RemoteInfo(
+      RemoteNode node, Optional<RemoteNode> byNode, Optional<ForwardingInfo> forwarding) {
+
+    /** Create direct selected remote metadata without accepted forwarding information. */
+    public RemoteInfo(RemoteNode node, Optional<RemoteNode> byNode) {
+      this(node, byNode, Optional.empty());
+    }
+
+    public RemoteInfo {
+      Objects.requireNonNull(node, "A selected remote node must not be null");
+      Objects.requireNonNull(byNode, "A by-node option must not be null");
+      Objects.requireNonNull(forwarding, "A forwarding metadata option must not be null");
+    }
+
+    /**
+     * @return the selected endpoint represented by {@link #node()} and {@link #byNode()}
+     */
+    public RemoteEndpoint endpoint() {
+      return new RemoteEndpoint(node, byNode);
+    }
+
+    /**
+     * Return the accepted remote path in client-to-Play order.
+     *
+     * <p>For a direct request this contains only {@link #endpoint()}, which represents the direct
+     * transport peer. For a forwarded request it contains the selected endpoint followed by the
+     * trusted intermediate proxy endpoints Play traversed, but excludes the independently observed
+     * direct transport peer.
+     *
+     * @return the immutable accepted remote path
+     */
+    public List<RemoteEndpoint> path() {
+      ArrayList<RemoteEndpoint> path = new ArrayList<>();
+      path.add(endpoint());
+      forwarding.ifPresent(value -> path.addAll(value.via()));
+      return List.copyOf(path);
+    }
+
+    /**
+     * @return whether the selected endpoint was obtained from accepted forwarding metadata
+     */
+    public boolean isForwarded() {
+      return forwarding.isPresent();
+    }
+
+    /**
+     * The selected remote identity.
+     *
+     * <p>When the identity is an IP address, the node may also include the selected remote port.
+     * RFC 7239 {@code unknown} and obfuscated identifiers are represented explicitly so
+     * applications do not need to parse a string value.
+     *
+     * @return the selected remote identity as an IP literal, obfuscated identifier, or {@code
+     *     unknown}
+     */
+    public String identity() {
+      if (node instanceof RemoteNode.Ip ip) {
+        return ip.address().getHostAddress();
+      } else if (node instanceof RemoteNode.Obfuscated obfuscated) {
+        return obfuscated.identifier();
+      } else {
+        return "unknown";
+      }
+    }
+
+    /**
+     * The RFC 7239 {@code by} node for the selected forwarded element, if present.
+     *
+     * <p>This identifies the proxy interface that received the request represented by {@link
+     * #node()}. It is not the selected remote identity; use {@link #node()} for that.
+     *
+     * @return the receiving proxy node, if present
+     */
+    @Override
+    public Optional<RemoteNode> byNode() {
+      return byNode;
+    }
+
+    /**
+     * The accepted forwarding metadata used to select this remote endpoint.
+     *
+     * <p>This is empty for a direct request. It is present even when a forwarded request has no
+     * intermediate forwarded proxy endpoints.
+     *
+     * @return accepted remote forwarding metadata, if the selected endpoint was forwarded
+     */
+    @Override
+    public Optional<ForwardingInfo> forwarding() {
+      return forwarding;
+    }
+
+    /**
+     * @return the selected remote IP address, if the remote identity is an IP address
+     */
+    public Optional<InetAddress> ipAddress() {
+      return node instanceof RemoteNode.Ip ip ? Optional.of(ip.address()) : Optional.empty();
+    }
+
+    /**
+     * @return the numeric or obfuscated port attached to the selected remote node, if known
+     */
+    public Optional<NodePort> nodePort() {
+      return node.port();
+    }
+
+    /**
+     * @return the numeric source port of the selected remote node, if known
+     */
+    public Optional<Integer> port() {
+      return nodePort()
+          .filter(NodePort.Numeric.class::isInstance)
+          .map(NodePort.Numeric.class::cast)
+          .map(NodePort.Numeric::value);
+    }
+
+    /**
+     * @return the Scala version of this selected remote metadata
+     */
+    public play.api.mvc.request.RemoteInfo asScala() {
+      return play.api.mvc.request.RemoteInfo$.MODULE$.create(
+          node.asScala(),
+          OptionConverters.toScala(byNode.map(RemoteNode::asScala)),
+          OptionConverters.toScala(forwarding.map(ForwardingInfo::asScala)));
     }
   }
 

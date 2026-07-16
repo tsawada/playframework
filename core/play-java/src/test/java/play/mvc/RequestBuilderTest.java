@@ -5,8 +5,10 @@
 package play.mvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.*;
 
+import com.google.common.net.InetAddresses;
 import java.io.File;
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -35,6 +37,108 @@ import play.mvc.Http.RequestBuilder;
 import play.test.Helpers;
 
 public class RequestBuilderTest {
+
+  @Test
+  public void testRemoteInfoValueTypes() {
+    Http.RemoteNode.Ip ip =
+        new Http.RemoteNode.Ip(
+            InetAddresses.forString("192.0.2.43"), Optional.of(new Http.NodePort.Numeric(53124)));
+    Http.RemoteNode.Obfuscated by = new Http.RemoteNode.Obfuscated("_edge", Optional.empty());
+    Http.RemoteInfo remote = new Http.RemoteInfo(ip, Optional.of(by));
+
+    assertEquals(ip, remote.node());
+    assertEquals(Optional.of(by), remote.byNode());
+    assertEquals("192.0.2.43", remote.identity());
+    assertEquals(Optional.of(InetAddresses.forString("192.0.2.43")), remote.ipAddress());
+    assertEquals(Optional.of(new Http.NodePort.Numeric(53124)), remote.nodePort());
+    assertEquals(Optional.of(53124), remote.port());
+    assertEquals(remote, remote.asScala().asJava());
+    assertEquals(new Http.RemoteInfo(ip, Optional.of(by)), remote);
+
+    Http.RemoteInfo obfuscated =
+        new Http.RemoteInfo(
+            new Http.RemoteNode.Obfuscated(
+                "_client", Optional.of(new Http.NodePort.Obfuscated("_port"))),
+            Optional.empty());
+    assertEquals("_client", obfuscated.identity());
+    assertEquals(Optional.empty(), obfuscated.ipAddress());
+    assertEquals(Optional.of(new Http.NodePort.Obfuscated("_port")), obfuscated.nodePort());
+    assertEquals(Optional.empty(), obfuscated.port());
+    assertEquals(obfuscated, obfuscated.asScala().asJava());
+
+    Http.RemoteInfo unknown =
+        new Http.RemoteInfo(new Http.RemoteNode.Unknown(Optional.empty()), Optional.empty());
+    assertEquals("unknown", unknown.identity());
+    assertEquals(Optional.empty(), unknown.ipAddress());
+    assertEquals(Optional.empty(), unknown.port());
+    assertEquals(unknown, unknown.asScala().asJava());
+
+    assertThatThrownBy(() -> new Http.RemoteInfo(null, Optional.empty()))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> new Http.RemoteInfo(ip, null))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> new Http.RemoteNode.Obfuscated("not-obfuscated", Optional.empty()))
+        .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  @Test
+  public void testRemoteForwardingValueTypes() {
+    Http.RemoteEndpoint selected =
+        new Http.RemoteEndpoint(
+            new Http.RemoteNode.Ip(InetAddresses.forString("203.0.113.43"), Optional.empty()),
+            Optional.of(new Http.RemoteNode.Obfuscated("_edge", Optional.empty())));
+    Http.RemoteEndpoint proxy =
+        new Http.RemoteEndpoint(
+            new Http.RemoteNode.Ip(InetAddresses.forString("192.0.2.10"), Optional.empty()),
+            Optional.of(new Http.RemoteNode.Obfuscated("_internal", Optional.empty())));
+    List<Http.RemoteEndpoint> mutableVia = new java.util.ArrayList<>(List.of(proxy));
+    Http.ForwardingInfo forwarding =
+        new Http.ForwardingInfo(Http.ForwardingSource.RFC_7239, mutableVia);
+    Http.RemoteInfo remote =
+        new Http.RemoteInfo(selected.node(), selected.byNode(), Optional.of(forwarding));
+
+    mutableVia.clear();
+
+    assertTrue(remote.isForwarded());
+    assertEquals(Http.ForwardingSource.RFC_7239, remote.forwarding().orElseThrow().source());
+    assertEquals(List.of(proxy), remote.forwarding().orElseThrow().via());
+    assertEquals(List.of(selected, proxy), remote.path());
+    assertEquals(remote, remote.asScala().asJava());
+    assertThatThrownBy(
+            () ->
+                remote
+                    .forwarding()
+                    .orElseThrow()
+                    .via()
+                    .add(
+                        new Http.RemoteEndpoint(
+                            new Http.RemoteNode.Unknown(Optional.empty()), Optional.empty())))
+        .isInstanceOf(UnsupportedOperationException.class);
+    assertThatThrownBy(() -> new Http.ForwardingInfo(null, List.of()))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> new Http.ForwardingInfo(Http.ForwardingSource.X_FORWARDED, null))
+        .isInstanceOf(NullPointerException.class);
+    assertThatThrownBy(() -> new Http.RemoteInfo(selected.node(), selected.byNode(), null))
+        .isInstanceOf(NullPointerException.class);
+  }
+
+  @Test
+  public void testNodePortValidation() {
+    assertEquals(0, new Http.NodePort.Numeric(0).value());
+    assertEquals(65535, new Http.NodePort.Numeric(65535).value());
+    assertEquals("_Edge.1_test-port", new Http.NodePort.Obfuscated("_Edge.1_test-port").value());
+
+    assertThatThrownBy(() -> new Http.NodePort.Numeric(-1))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> new Http.NodePort.Numeric(65536))
+        .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> new Http.NodePort.Obfuscated(null))
+        .isInstanceOf(NullPointerException.class);
+    for (String value : List.of("", "_", "port", "_bad value", "_bad!")) {
+      assertThatThrownBy(() -> new Http.NodePort.Obfuscated(value))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
 
   @Test
   public void testUri_absolute() {
