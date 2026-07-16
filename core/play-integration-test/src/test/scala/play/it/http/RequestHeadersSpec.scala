@@ -11,6 +11,7 @@ import play.api.test._
 import play.api.Configuration
 import play.api.Mode
 import play.core.server.ServerConfig
+import play.filters.cors.CORSFilter
 import play.filters.hosts.AllowedHostsFilter
 import play.it._
 
@@ -860,6 +861,110 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         )
         response.status must_== OK
         response.body must beLeft("public.example:2147483648")
+      }
+    }
+
+    "handle a trusted forwarded IPvFuture host with the CORS filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[CORSFilter].getName)
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "Origin"    -> "http://www.example.com",
+              "Forwarded" -> "for=192.0.2.43;host=\"[V1.FE80::A]\""
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("[v1.fe80::a]")
+        response.headers.get(ACCESS_CONTROL_ALLOW_ORIGIN) must beSome("http://www.example.com")
+      }
+    }
+
+    "treat an explicit trusted forwarded default port as the same CORS origin" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[CORSFilter].getName)
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "Origin"    -> "http://public.example",
+              "Forwarded" -> "for=192.0.2.43;host=\"public.example:80\""
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("public.example:80")
+        response.headers.get(ACCESS_CONTROL_ALLOW_ORIGIN) must beNone
+      }
+    }
+
+    "treat an explicit trusted forwarded HTTPS default port as the same CORS origin" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[CORSFilter].getName)
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "Origin"    -> "https://public.example",
+              "Forwarded" -> "for=192.0.2.43;proto=https;host=\"public.example:443\""
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("public.example:443")
+        response.headers.get(ACCESS_CONTROL_ALLOW_ORIGIN) must beNone
+      }
+    }
+
+    "treat a separate trusted x-forwarded default port as the same CORS origin" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedHost" -> true,
+        "play.http.forwarded.trustXForwardedPort" -> true,
+        "play.filters.enabled"                    -> Seq(classOf[CORSFilter].getName)
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "Origin"            -> "http://public.example",
+              "X-Forwarded-For"   -> "192.0.2.43",
+              "X-Forwarded-Proto" -> "http",
+              "X-Forwarded-Host"  -> "public.example",
+              "X-Forwarded-Port"  -> "80"
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("public.example:80")
+        response.headers.get(ACCESS_CONTROL_ALLOW_ORIGIN) must beNone
       }
     }
 

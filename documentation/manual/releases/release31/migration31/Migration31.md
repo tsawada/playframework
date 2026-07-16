@@ -40,6 +40,12 @@ with no `X-Forwarded-Proto`. Play 3.0 selected the forwarded client address but 
 
 This can change redirect and HSTS behavior, absolute and WebSocket URL generation, CORS same-origin decisions, and application policy that reads `request.secure` or `request.scheme`. If the public client scheme can differ from the proxy-to-Play transport scheme, configure the trusted proxy to emit a valid, correctly aligned `X-Forwarded-Proto` value; otherwise Play can only retain the last scheme it has verified.
 
+### CORS same-origin checks use effective request metadata
+
+The CORS filter now compares the `Origin` header with the request's normalized effective scheme, host, and port from `RequestHeader.scheme` and `RequestHeader.authority`. An omitted port is equivalent to port `80` for HTTP or `443` for HTTPS. For example, `http://www.example.com` and `http://www.example.com:80` are now the same origin, as are the corresponding HTTPS forms with port `443`.
+
+Accepted trusted forwarding metadata can therefore change the request origin used by CORS. A trusted forwarded scheme, host, or port can make the public origin match even when the direct proxy-to-Play scheme or internal `Host` differs. The CORS filter does not read `Forwarded` or `X-Forwarded-*` fields directly: only metadata accepted from a configured trusted proxy through enabled forwarding options affects the comparison. Untrusted, disabled, or invalid forwarding metadata has no CORS effect. Review CORS behavior during upgrade if your deployment exposes different public and internal origins, and see [[configuring trusted proxies|HTTPServer#configuring-trusted-proxies]].
+
 ### HEAD responses no longer include generated Content-Length headers
 
 Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.
