@@ -84,7 +84,16 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
       )
 
       result mustEqual ParsedForwarding(
-        RemoteInfo.ip("203.0.113.43", None),
+        RemoteInfo
+          .ip("203.0.113.43", None)
+          .copy(
+            forwarding = Some(
+              play.api.mvc.request.ForwardingInfo(
+                play.api.mvc.request.ForwardingSource.Rfc7239,
+                Vector.empty
+              )
+            )
+          ),
         Scheme.Https,
         Some(RequestAuthority.parseOrThrow("internal.example:9000"))
       )

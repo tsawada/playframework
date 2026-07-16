@@ -9,7 +9,10 @@ import java.util.regex.Pattern
 import scala.annotation.tailrec
 
 import play.api.http.HeaderNames
+import play.api.mvc.request.ForwardingInfo
+import play.api.mvc.request.ForwardingSource
 import play.api.mvc.request.NodePort
+import play.api.mvc.request.RemoteEndpoint
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RemoteNode
 import play.api.mvc.request.RequestAuthority
@@ -61,12 +64,30 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
     // the nearest proxies will be at the end of the list and we need
     // to move backwards through the list to get to the original IP.
     val headerEntries: Iterator[ForwardedEntry] = configuration.forwardedHeaders(headers).reverseIterator
+    val forwardingSource                        = configuration.version match {
+      case Rfc7239    => ForwardingSource.Rfc7239
+      case Xforwarded => ForwardingSource.XForwarded
+    }
+
+    def result(
+        remote: RemoteInfo,
+        scheme: Scheme,
+        authority: Option[RequestAuthority],
+        acceptedPath: List[RemoteEndpoint]
+    ): ParsedForwarding = {
+      val selectedRemote = acceptedPath match {
+        case _ :: via => remote.copy(forwarding = Some(ForwardingInfo(forwardingSource, via.toVector)))
+        case Nil      => remote
+      }
+      ParsedForwarding(selectedRemote, scheme, authority)
+    }
 
     @tailrec
     def scan(
         prev: RemoteInfo,
         scheme: Scheme,
-        authority: Option[RequestAuthority]
+        authority: Option[RequestAuthority],
+        acceptedPath: List[RemoteEndpoint]
     ): ParsedForwarding = {
       // Check if there's a forwarded header for us to scan.
       if (headerEntries.hasNext) {
@@ -81,7 +102,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
               ForwardedHeaderHandler.logger.debug(
                 s"Error with info in forwarding header $entry, using $prev instead: $error."
               )
-              ParsedForwarding(prev, scheme, authority)
+              result(prev, scheme, authority, acceptedPath)
             case Right(parsedEntry) =>
               val selectedScheme =
                 if (entry.protoString.contains("https")) Scheme.Https else Scheme.Http
@@ -90,23 +111,24 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                   ForwardedHeaderHandler.logger.debug(
                     s"Error with info in forwarding header $entry, using $prev instead: No address."
                   )
-                  ParsedForwarding(prev, scheme, authority)
+                  result(prev, scheme, authority, acceptedPath)
                 case Some(value) =>
+                  val selectedPath = value.remote.endpoint :: acceptedPath
                   if (configuration.canContinueScanning(value.remote.node)) {
-                    scan(value.remote, selectedScheme, authority)
+                    scan(value.remote, selectedScheme, authority, selectedPath)
                   } else {
-                    ParsedForwarding(value.remote, selectedScheme, authority)
+                    result(value.remote, selectedScheme, authority, selectedPath)
                   }
               }
           }
         } else {
           // 'prev' is not a trusted proxy, so we don't scan ahead in the list of
           // forwards, we just return 'prev'.
-          ParsedForwarding(prev, scheme, authority)
+          result(prev, scheme, authority, acceptedPath)
         }
       } else {
         // No more headers to process, so just use its address.
-        ParsedForwarding(prev, scheme, authority)
+        result(prev, scheme, authority, acceptedPath)
       }
     }
 
@@ -115,7 +137,8 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
     scan(
       rawRemote,
       initialScheme,
-      initialAuthority
+      initialAuthority,
+      acceptedPath = Nil
     )
   }
 }

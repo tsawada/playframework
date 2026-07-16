@@ -54,7 +54,11 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
       )
     )
 
-  def forwardedResult(parsed: ParsedForwarding): ForwardedResult = ForwardedResult(parsed.remote, parsed.scheme)
+  def forwardedResult(parsed: ParsedForwarding): ForwardedResult = {
+    // Existing scanner tests compare only the selected endpoint and scheme. Dedicated provenance
+    // tests assert the complete accepted path so those concerns remain independently reviewable.
+    ForwardedResult(parsed.remote.copy(forwarding = None), parsed.scheme)
+  }
 
   def forwardedResultFrom(
       forwardedHeaderHandler: ForwardedHeaderHandler,
