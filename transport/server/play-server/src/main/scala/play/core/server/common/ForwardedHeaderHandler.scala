@@ -28,22 +28,83 @@ import play.core.server.common.NodeIdentifierParser.UnknownIp
 import ForwardedHeaderHandler._
 
 /**
- * Selects typed remote-node metadata from Forwarded and X-Forwarded headers
- * supplied by configured trusted IP proxies and explicitly trusted RFC 7239
- * obfuscated proxy identifiers.
+ * Derives the selected remote identity and endpoint port, effective request scheme,
+ * and effective authority from Forwarded and X-Forwarded-* headers supplied by
+ * trusted proxies. The algorithm is as follows:
  *
- * RFC 7239 node identities, by nodes, and numeric or obfuscated node ports
- * are preserved without conflating selected remote metadata with the direct
- * transport connection.
+ * 1. Start with the immediate connection to the application.
+ * 2. If the proxy *did not* send a valid Forwarded or X-Forwarded-* header then return
+ *    the direct remote and don't do any further processing.
+ * 3. If the proxy *did* send a valid header then work out whether we trust it by
+ *    checking whether the immediate connection is in our list of trusted
+ *    proxies or trusted RFC 7239 obfuscated proxy identifiers.
+ * 4. If the immediate connection *is* a trusted proxy, then resume at step
+ *    1 using the remote info in the forwarded header. If the forwarded
+ *    identity is not an IP address, keep it as the selected remote identity
+ *    and stop scanning unless it is an explicitly trusted obfuscated identifier.
+ * 5. If the immediate remote *is not* a trusted proxy, then return it and don't
+ *    do any further processing.
  *
- * Trusted protocol metadata advances the effective request scheme independently
- * of the transport TLS state. Missing or ambiguous protocol metadata retains the
- * last verified scheme. Explicit opt-ins cover legacy deployments that provide a
- * single X-Forwarded-Proto value, omit X-Forwarded-For, or use X-Forwarded-Ssl.
+ * Each identity can include its remote endpoint port. The effective request
+ * scheme is tracked separately. If the `proto` entry is missing, or if `proto`
+ * entries can't be matched with addresses, then the prior verified scheme is retained.
+ * When `play.http.forwarded.trustSingleXForwardedProto` is enabled, a lone
+ * `X-Forwarded-Proto` entry is associated with the client address instead of
+ * being discarded.
+ * When `play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor` is
+ * enabled, a lone `X-Forwarded-Proto` entry without `X-Forwarded-For` updates
+ * the effective scheme of the trusted proxy request without changing the remote
+ * identity.
+ * When `play.http.forwarded.trustXForwardedSsl` is enabled and
+ * `X-Forwarded-Proto` is absent, a lone `X-Forwarded-Ssl` value supplies the
+ * original request protocol.
+ *
+ * Relevant configuration options include:
+ * <dl>
+ *   <dt>play.http.forwarded.version</dt>
+ *   <dd>
+ *     The version of the forwarded headers it uses to parse the headers. It can be
+ *     <code>x-forwarded</code> for legacy headers or
+ *     <code>rfc7239</code> for the definition from the RFC 7239 <br>
+ *     Default is x-forwarded.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustedProxies</dt>
+ *   <dd>
+ *     A list of proxies that are ignored when getting the remote identity, remote address, or remote port.
+ *     It can have optionally an address block size. When the address block size is set,
+ *     all IP-addresses in the range of the subnet will be treated as trusted.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustedProxyIdentifiers</dt>
+ *   <dd>
+ *     A list of RFC 7239 obfuscated proxy identifiers that are ignored when getting the
+ *     remote identity. This only applies when using <code>rfc7239</code>.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustForwardedHost</dt>
+ *   <dd>
+ *     Whether to use a trusted RFC 7239 <code>host</code> parameter as the
+ *     effective request host. This only applies when using <code>rfc7239</code>.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustSingleXForwardedProto</dt>
+ *   <dd>
+ *     Whether one X-Forwarded-Proto value may be associated with a longer
+ *     X-Forwarded-For chain.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor</dt>
+ *   <dd>
+ *     Whether one X-Forwarded-Proto value may update the effective scheme
+ *     without a forwarded identity.
+ *   </dd>
+ *   <dt>play.http.forwarded.trustXForwardedSsl</dt>
+ *   <dd>
+ *     Whether one trusted <code>X-Forwarded-Ssl</code> value supplies the
+ *     original request protocol when <code>X-Forwarded-Proto</code> is absent.
+ *     This only applies when using <code>x-forwarded</code>.
+ *   </dd>
+ * </dl>
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
 
-  /** Update remote and scheme metadata in one trusted-proxy scan while preserving the request authority. */
+  /** Update remote, scheme, and authority metadata in one trusted-proxy scan. */
   def forwardedRequest(
       rawRemote: RemoteInfo,
       headers: Headers,
@@ -110,12 +171,15 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
               )
               result(prev, scheme, authority, acceptedPath)
             case Right(parsedEntry) =>
-              val selectedScheme = configuration.forwardedScheme(entry).getOrElse(scheme)
+              val forwardedAuthority = configuration.forwardedAuthority(entry)
+              val selectedAuthority  = forwardedAuthority.orElse(authority)
+              val selectedScheme     = configuration.forwardedScheme(entry).getOrElse(scheme)
               parsedEntry match {
-                case None if configuration.forwardedSchemeWithoutFor(entry).isDefined =>
-                  // Scheme metadata can describe the original request without
-                  // identifying the preceding node. Do not scan earlier elements.
-                  result(prev, selectedScheme, authority, acceptedPath)
+                case None if forwardedAuthority.isDefined || configuration.forwardedSchemeWithoutFor(entry).isDefined =>
+                  // Forwarded metadata can describe the original scheme or host without
+                  // identifying the preceding node. Apply that metadata to the current
+                  // connection, but do not scan any earlier elements without an identity.
+                  result(prev, selectedScheme, selectedAuthority, acceptedPath)
                 case None =>
                   ForwardedHeaderHandler.logger.debug(
                     s"Error with info in forwarding header $entry, using $prev instead: No address."
@@ -124,9 +188,9 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
                 case Some(value) =>
                   val selectedPath = value.remote.endpoint :: acceptedPath
                   if (configuration.canContinueScanning(value.remote.node)) {
-                    scan(value.remote, selectedScheme, authority, selectedPath)
+                    scan(value.remote, selectedScheme, selectedAuthority, selectedPath)
                   } else {
-                    result(value.remote, selectedScheme, authority, selectedPath)
+                    result(value.remote, selectedScheme, selectedAuthority, selectedPath)
                   }
               }
           }
@@ -171,7 +235,8 @@ private[server] object ForwardedHeaderHandler {
   final case class ForwardedEntry(
       addressString: Option[String],
       protoString: Option[String],
-      byString: Option[String] = None
+      byString: Option[String] = None,
+      hostString: Option[String] = None
   )
 
   final case class ParsedForwarding(
@@ -190,6 +255,7 @@ private[server] object ForwardedHeaderHandler {
       trustedProxies: List[Subnet],
       trustedProxyIdentifiers: Set[String] = Set.empty,
       trustSingleXForwardedProto: Boolean = false,
+      trustForwardedHost: Boolean = false,
       trustXForwardedProtoWithoutXForwardedFor: Boolean = false,
       trustXForwardedSsl: Boolean = false
   ) {
@@ -207,7 +273,7 @@ private[server] object ForwardedHeaderHandler {
     }
 
     /**
-     * Parse any Forward or X-Forwarded-* headers into a sequence of ForwardedEntry
+     * Parse any Forwarded or X-Forwarded-* headers into a sequence of ForwardedEntry
      * objects containing optional unparsed remote and request metadata.
      * Parameter-specific parsing happens while the trusted proxy chain is scanned.
      * A malformed RFC 7239 field produces an empty entry so trusted-proxy scanning
@@ -223,7 +289,8 @@ private[server] object ForwardedHeaderHandler {
                 ForwardedEntry(
                   paramMap.get("for"),
                   paramMap.get("proto"),
-                  byString = paramMap.get("by")
+                  byString = paramMap.get("by"),
+                  hostString = paramMap.get("host")
                 )
               }
             case Left(error) =>
@@ -344,9 +411,23 @@ private[server] object ForwardedHeaderHandler {
       case RemoteNode.Unknown(_)                => false
     }
 
-    /** Check whether an RFC 7239 obfuscated identifier is a configured trusted proxy. */
+    /**
+     * Check if an RFC 7239 obfuscated identifier is considered to be a trusted proxy.
+     */
     def isTrustedProxyIdentifier(identifier: String): Boolean = {
       version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
+    }
+
+    /** Return a syntactically valid authority with a usable host from this RFC 7239 element when enabled. */
+    def forwardedAuthority(entry: ForwardedEntry): Option[RequestAuthority] = {
+      Option
+        .when(version == Rfc7239 && trustForwardedHost)(entry.hostString)
+        .flatten
+        .flatMap(usableForwardedAuthority)
+    }
+
+    private def usableForwardedAuthority(value: String): Option[RequestAuthority] = {
+      RequestAuthority.parse(value).toOption.filter(_.host.render.nonEmpty)
     }
 
     private def singleXForwardedValue(headers: Headers, name: String): Option[String] = {
@@ -419,6 +500,7 @@ private[server] object ForwardedHeaderHandler {
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
         trustedProxyIdentifiers.toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
+        config.getOptional[Boolean]("trustForwardedHost").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedSsl").getOrElse(false)
       )

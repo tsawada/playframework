@@ -61,9 +61,10 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
         (
           ForwardedHeaderHandlerConfig(
             version = Rfc7239,
-            trustedProxies = List.empty
+            trustedProxies = List.empty,
+            trustForwardedHost = true
           ),
-          Seq("Forwarded" -> """for=";proto=https""")
+          Seq("Forwarded" -> """for=";proto=https;host=public.example""")
         ),
         (
           ForwardedHeaderHandlerConfig(
@@ -96,9 +97,11 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
 
     "parse forwarding headers when the direct peer is trusted" in {
       val requestHeaders = new TrackingHeaders(
-        Seq("Forwarded" -> "for=203.0.113.43;proto=https")
+        Seq("Forwarded" -> "for=203.0.113.43;proto=https;host=public.example")
       )
-      val result = handler(version("rfc7239") ++ trustedProxies("127.0.0.1")).forwardedRequest(
+      val result = handler(
+        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true)
+      ).forwardedRequest(
         RemoteInfo.ip("127.0.0.1", Some(NodePort.Numeric(53124))),
         requestHeaders,
         Scheme.Http,
@@ -117,7 +120,7 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
             )
           ),
         Scheme.Https,
-        Some(RequestAuthority.parseOrThrow("internal.example:9000"))
+        Some(RequestAuthority.parseOrThrow("public.example"))
       )
       requestHeaders.lookups must contain("Forwarded")
     }

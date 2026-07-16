@@ -527,6 +527,135 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "keep the original host when forwarded host handling is disabled" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { rh => Results.Ok(s"${rh.host}|${rh.headers(HOST)}") }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=public.example"),
+            ""
+          )
+        )
+        response.body must beLeft("localhost|localhost")
+      }
+    }
+
+    "expose one typed forwarded scheme and authority consistently" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true
+      )((Action, _) =>
+        Action { request =>
+          Results.Ok(
+            Seq(
+              request.scheme.render,
+              request.asJava.scheme.render,
+              request.authority.map(_.render).getOrElse("<none>"),
+              request.asJava.authority.orElseThrow().render,
+              request.host,
+              request.headers(HOST),
+              request.secure
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=203.0.113.43;proto=HtTpS;host=\"PUBLIC.EXAMPLE:08443\""),
+            ""
+          )
+        )
+
+        response.body must beLeft(
+          "https|https|public.example:8443|public.example:8443|public.example:8443|public.example:8443|true"
+        )
+      }
+    }
+
+    "keep the original host when a forwarded host is invalid" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true
+      )((Action, _) => Action { rh => Results.Ok(s"${rh.host}|${rh.headers(HOST)}") }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=\"user@example.org\""),
+            ""
+          )
+        )
+        response.body must beLeft("localhost|localhost")
+      }
+    }
+
+    "use a trusted forwarded host with an absolute request target" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true
+      )((Action, _) => Action { rh => Results.Ok(s"${rh.host}|${rh.headers(HOST)}") }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://localhost/path",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=public.example"),
+            ""
+          )
+        )
+        response.body must beLeft("public.example|public.example")
+      }
+    }
+
+    "validate the trusted forwarded host with the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"             -> Seq("public.example")
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=public.example"),
+            ""
+          )
+        )
+        response.status must_== OK
+        response.body must beLeft("public.example")
+      }
+    }
+
+    "reject a trusted forwarded host not accepted by the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"             -> Seq("localhost")
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=public.example"),
+            ""
+          )
+        )
+        response.status must_== BAD_REQUEST
+      }
+    }
+
     "respect max header value setting" in {
       withServerAndConfig("play.server.max-header-size" -> "64")((Action, _) => Action(Results.Ok)) { port =>
         val responses = BasicHttpClient.makeRequests(port)(

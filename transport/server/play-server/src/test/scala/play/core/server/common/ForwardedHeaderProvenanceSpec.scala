@@ -12,14 +12,22 @@ import play.api.mvc.request.RemoteNode
 
 class ForwardedHeaderProvenanceSpec extends Specification with ForwardedHeaderHandlerSpecSupport {
   "ForwardedHeaderHandler remote provenance" should {
-    "leave direct requests without a forwarded path" in {
+    "leave direct and metadata-only requests without a forwarded path" in {
       val direct = forwardedRequestToLocalhost(
         version("rfc7239") ++ trustedProxies("127.0.0.1"),
         ""
       )
+      val metadataOnly = forwardedRequestToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustForwardedHost(true),
+        """
+          |Forwarded: by=_edge;proto=https;host=public.example
+        """.stripMargin
+      )
 
       direct.remote.forwarding must beNone
       direct.remote.isForwarded must beFalse
+      metadataOnly.remote.forwarding must beNone
+      metadataOnly.remote.isForwarded must beFalse
     }
 
     "distinguish one accepted forwarded endpoint from a direct request" in {

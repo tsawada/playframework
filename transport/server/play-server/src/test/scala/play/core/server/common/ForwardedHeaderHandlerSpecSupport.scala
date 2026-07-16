@@ -28,6 +28,15 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
   def forwardedResultToLocalhost(config: Map[String, Any], headersText: String): ForwardedResult =
     forwardedResult(forwardedRequestToLocalhost(config, headersText))
 
+  def forwardedHostToLocalhost(
+      config: Map[String, Any],
+      headersText: String,
+      host: String = "localhost"
+  ): Option[String] = {
+    val initial = RequestAuthority.parse(host).toOption.map(_.render)
+    forwardedRequestToLocalhost(config, headersText, host).authority.map(_.render).filterNot(initial.contains)
+  }
+
   def forwardedRequestToLocalhost(
       config: Map[String, Any],
       headersText: String,
@@ -119,6 +128,10 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
 
   def trustXForwardedSsl(b: Boolean) = {
     Map("play.http.forwarded.trustXForwardedSsl" -> b)
+  }
+
+  def trustForwardedHost(b: Boolean) = {
+    Map("play.http.forwarded.trustForwardedHost" -> b)
   }
 
   def headers(s: String): Headers = {
