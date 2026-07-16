@@ -125,10 +125,11 @@ private[server] class PekkoModelConversion(
   /**
    * Build a nonthrowing header for reporting a request-conversion error.
    *
-   * Normal request conversion validates authority and applies trusted forwarding metadata. Reusing
-   * it after conversion failed could repeat the same exception while constructing the RequestHeader
-   * required by HttpErrorHandler. This recovery path therefore uses direct transport metadata,
-   * derives authority best-effort, and deliberately skips forwarded-header processing.
+   * Normal request conversion might have failed before all target metadata was available. This
+   * recovery path therefore derives target metadata best-effort and still applies independently
+   * valid trusted forwarding metadata. Forwarding validation is fail-closed; an unexpected failure
+   * falls back to the directly observed request metadata so construction for HttpErrorHandler cannot
+   * repeat the original failure.
    */
   def createErrorRequestHeader(
       headers: Headers,
@@ -137,17 +138,27 @@ private[server] class PekkoModelConversion(
       requestTarget: RequestTarget,
       request: HttpRequest
   ): RequestHeader = {
-    val transport = createTransport(remoteAddress, secureProtocol, request)
-    val rawRemote = RemoteInfo.fromPeer(transport.peer)
-    val scheme    = RequestHeader.initialScheme(transport)
-    val authority = RequestHeader
+    val transport     = createTransport(remoteAddress, secureProtocol, request)
+    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
+    val directScheme  = RequestHeader.initialScheme(transport)
+    val initialTarget = RequestHeader
       .initialRequestTarget(request.method.name, requestTarget, request.protocol.value, headers)
       .toOption
-      .flatMap(_.authority)
+    val initialAuthority = initialTarget.flatMap(_.authority)
+    val forwarding       = try {
+      forwardedHeaderHandler.forwardedRequest(rawRemote, headers, directScheme, initialAuthority)
+    } catch {
+      case NonFatal(error) =>
+        logger.warn("Failed to apply forwarded metadata to an error request; using direct metadata.", error)
+        ForwardedHeaderHandler.ParsedForwarding(rawRemote, directScheme, initialAuthority)
+    }
+    val scheme = RequestHeader
+      .effectiveScheme(initialTarget.flatMap(_.scheme), directScheme, forwarding.scheme)
+      .getOrElse(forwarding.scheme)
     val attrs = TypedMap(RequestAttrKey.Id -> RequestIdProvider.freshId())
 
     new RequestHeaderImpl(
-      rawRemote,
+      forwarding.remote,
       request.method.name,
       requestTarget,
       request.protocol.value,
@@ -155,7 +166,7 @@ private[server] class PekkoModelConversion(
       attrs,
       transport,
       scheme,
-      authority
+      forwarding.authority
     )
   }
 
