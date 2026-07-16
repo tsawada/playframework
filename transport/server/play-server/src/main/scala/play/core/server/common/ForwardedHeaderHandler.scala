@@ -29,7 +29,8 @@ import ForwardedHeaderHandler._
 
 /**
  * Selects typed remote-node metadata from Forwarded and X-Forwarded headers
- * supplied by configured trusted IP proxies.
+ * supplied by configured trusted IP proxies and explicitly trusted RFC 7239
+ * obfuscated proxy identifiers.
  *
  * RFC 7239 node identities, by nodes, and numeric or obfuscated node ports
  * are preserved without conflating selected remote metadata with the direct
@@ -177,7 +178,8 @@ private[server] object ForwardedHeaderHandler {
 
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
-      trustedProxies: List[Subnet]
+      trustedProxies: List[Subnet],
+      trustedProxyIdentifiers: Set[String] = Set.empty
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -285,16 +287,23 @@ private[server] object ForwardedHeaderHandler {
 
     /** Check whether a selected remote node may supply trusted forwarding metadata. */
     def isTrustedProxy(node: RemoteNode): Boolean = node match {
-      case RemoteNode.Ip(address, _) => trustedProxies.exists(_.isInRange(address))
-      case _                         => false
+      case RemoteNode.Ip(address, _)            => trustedProxies.exists(_.isInRange(address))
+      case RemoteNode.Obfuscated(identifier, _) => isTrustedProxyIdentifier(identifier)
+      case RemoteNode.Unknown(_)                => false
     }
 
     /**
      * Check if a forwarded node can be evaluated for trust in the next scan step.
      */
     def canContinueScanning(remoteNode: RemoteNode): Boolean = remoteNode match {
-      case RemoteNode.Ip(_, _) => true
-      case _                   => false
+      case RemoteNode.Ip(_, _)                  => true
+      case RemoteNode.Obfuscated(identifier, _) => isTrustedProxyIdentifier(identifier)
+      case RemoteNode.Unknown(_)                => false
+    }
+
+    /** Check whether an RFC 7239 obfuscated identifier is a configured trusted proxy. */
+    def isTrustedProxyIdentifier(identifier: String): Boolean = {
+      version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
     }
 
   }
@@ -309,9 +318,27 @@ private[server] object ForwardedHeaderHandler {
         case _             => throw config.reportError("version", "Forwarded header version must be either x-forwarded or rfc7239")
       }
 
+      val trustedProxyIdentifiers =
+        config.getOptional[Seq[String]]("trustedProxyIdentifiers").getOrElse(Seq.empty)
+      trustedProxyIdentifiers.foreach {
+        case identifier if identifier.equalsIgnoreCase("unknown") =>
+          throw config.reportError(
+            "trustedProxyIdentifiers",
+            "The RFC 7239 unknown identifier cannot be configured as a trusted proxy"
+          )
+        case identifier if !NodePort.isObfuscatedIdentifier(identifier) =>
+          throw config.reportError(
+            "trustedProxyIdentifiers",
+            s"Invalid RFC 7239 obfuscated identifier '$identifier': expected '_' followed by one or more " +
+              "ASCII letters, digits, '.', '_', or '-'"
+          )
+        case _ =>
+      }
+
       ForwardedHeaderHandlerConfig(
         version,
-        config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList
+        config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
+        trustedProxyIdentifiers.toSet
       )
     }
   }

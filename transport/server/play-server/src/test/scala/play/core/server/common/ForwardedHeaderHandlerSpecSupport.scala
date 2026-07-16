@@ -105,6 +105,10 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
     Map("play.http.forwarded.trustedProxies" -> s)
   }
 
+  def trustedProxyIdentifiers(s: String*) = {
+    Map("play.http.forwarded.trustedProxyIdentifiers" -> s)
+  }
+
   def headers(s: String): Headers = {
     def split(s: String, regex: String): Option[(String, String)] = s.split(regex, 2).toList match {
       case k :: v :: Nil => Some(k -> v)
