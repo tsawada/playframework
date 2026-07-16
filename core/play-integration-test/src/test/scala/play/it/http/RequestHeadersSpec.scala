@@ -842,6 +842,27 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "allow an arbitrary-size trusted forwarded port with a host-only allowed-host rule" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "rfc7239",
+        "play.http.forwarded.trustForwardedHost" -> true,
+        "play.filters.enabled"                   -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"             -> Seq("public.example")
+      )((Action, _) => Action { rh => Results.Ok(rh.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=192.0.2.43;host=\"public.example:2147483648\""),
+            ""
+          )
+        )
+        response.status must_== OK
+        response.body must beLeft("public.example:2147483648")
+      }
+    }
+
     "respect max header value setting" in {
       withServerAndConfig("play.server.max-header-size" -> "64")((Action, _) => Action(Results.Ok)) { port =>
         val responses = BasicHttpClient.makeRequests(port)(
