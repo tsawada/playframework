@@ -148,6 +148,56 @@ class ForwardedHeaderSchemeSpec extends Specification with ForwardedHeaderHandle
       ) mustEqual expectedResult("203.0.113.43", false)
     }
 
+    "associate a single x-forwarded-proto with the client when trustSingleXForwardedProto is enabled" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "associate a single x-forwarded-proto with the client when trustSingleXForwardedProto is enabled and all addresses are trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "associate a single x-forwarded-proto with the client when multiple forwarded-for entries are trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "stop at an untrusted proxy when trustSingleXForwardedProto is enabled" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 198.51.100.17, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("198.51.100.17", false)
+    }
+
+    "retain the previously verified scheme for a shorter multi-value proto list even with single-proto trust" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
+          |X-Forwarded-Proto: https, https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
     "preserve the last verified rfc7239 scheme when an earlier entry omits proto" in {
       forwardedResultToLocalhost(
         version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleXForwardedProto(true),
@@ -156,6 +206,51 @@ class ForwardedHeaderSchemeSpec extends Specification with ForwardedHeaderHandle
           |Forwarded: for=192.168.1.43;proto=https
         """.stripMargin
       ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "ignore single x-forwarded-proto when x-forwarded-for is missing even when trustSingleXForwardedProto is enabled" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustSingleXForwardedProto(true),
+        """
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "use single x-forwarded-proto without x-forwarded-for when enabled and proxy is trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
+        """
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "use single x-forwarded-proto without x-forwarded-for case-insensitively" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
+        """
+          |X-Forwarded-Proto: HTTPS
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "ignore single x-forwarded-proto without x-forwarded-for when proxy is untrusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.0.2.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
+        """
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "ignore multiple x-forwarded-proto values without x-forwarded-for even when enabled" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedProtoWithoutXForwardedFor(true),
+        """
+          |X-Forwarded-Proto: https, http
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
     }
 
     "retain the previously verified scheme when the x-forwarded proto list is longer than the for list" in {

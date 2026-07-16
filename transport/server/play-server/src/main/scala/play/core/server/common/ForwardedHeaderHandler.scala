@@ -38,7 +38,8 @@ import ForwardedHeaderHandler._
  *
  * Trusted protocol metadata advances the effective request scheme independently
  * of the transport TLS state. Missing or ambiguous protocol metadata retains the
- * last verified scheme.
+ * last verified scheme. Explicit opt-ins cover legacy deployments that provide a
+ * single X-Forwarded-Proto value or omit X-Forwarded-For.
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
 
@@ -186,7 +187,9 @@ private[server] object ForwardedHeaderHandler {
   case class ForwardedHeaderHandlerConfig(
       version: ForwardedHeaderVersion,
       trustedProxies: List[Subnet],
-      trustedProxyIdentifiers: Set[String] = Set.empty
+      trustedProxyIdentifiers: Set[String] = Set.empty,
+      trustSingleXForwardedProto: Boolean = false,
+      trustXForwardedProtoWithoutXForwardedFor: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -244,12 +247,35 @@ private[server] object ForwardedHeaderHandler {
 
         val forHeaders   = h(headers, HeaderNames.X_FORWARDED_FOR)
         val protoHeaders = h(headers, HeaderNames.X_FORWARDED_PROTO)
-        if (forHeaders.length == protoHeaders.length) {
-          forHeaders.lazyZip(protoHeaders).map { (forwardedFor, forwardedProto) =>
-            ForwardedEntry(Some(forwardedFor), Some(forwardedProto))
+
+        def protoForIndex(index: Int): Option[String] = {
+          if (forHeaders.length == protoHeaders.length) {
+            protoHeaders.lift(index)
+          } else if (
+            trustSingleXForwardedProto &&
+            forHeaders.nonEmpty &&
+            protoHeaders.length == 1 &&
+            index == 0
+          ) {
+            protoHeaders.headOption
+          } else {
+            None
           }
+        }
+
+        val protoWithoutFor =
+          if (protoHeaders.length == 1 && trustXForwardedProtoWithoutXForwardedFor) {
+            protoHeaders.headOption
+          } else {
+            None
+          }
+
+        if (forHeaders.isEmpty && protoWithoutFor.isDefined) {
+          Seq(ForwardedEntry(None, protoWithoutFor))
         } else {
-          forHeaders.map(forwardedFor => ForwardedEntry(Some(forwardedFor), None))
+          forHeaders.zipWithIndex.map {
+            case (forwardedFor, index) => ForwardedEntry(Some(forwardedFor), protoForIndex(index))
+          }
         }
     }
 
@@ -320,7 +346,10 @@ private[server] object ForwardedHeaderHandler {
 
     /** Interpret trusted protocol metadata that has no forwarded identity. */
     def forwardedSchemeWithoutFor(entry: ForwardedEntry): Option[Scheme] = {
-      if (entry.addressString.isEmpty && version == Rfc7239) {
+      if (
+        entry.addressString.isEmpty &&
+        (version == Rfc7239 || (version == Xforwarded && trustXForwardedProtoWithoutXForwardedFor))
+      ) {
         forwardedScheme(entry)
       } else {
         None
@@ -359,7 +388,9 @@ private[server] object ForwardedHeaderHandler {
       ForwardedHeaderHandlerConfig(
         version,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
-        trustedProxyIdentifiers.toSet
+        trustedProxyIdentifiers.toSet,
+        config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
+        config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false)
       )
     }
   }
