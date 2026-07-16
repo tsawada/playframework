@@ -94,6 +94,12 @@ import ForwardedHeaderHandler._
  *     Whether one X-Forwarded-Proto value may update the effective scheme
  *     without a forwarded identity.
  *   </dd>
+ *   <dt>play.http.forwarded.trustXForwardedHost</dt>
+ *   <dd>
+ *     Whether one trusted <code>X-Forwarded-Host</code> value replaces the
+ *     effective request host. This only applies when using
+ *     <code>x-forwarded</code>.
+ *   </dd>
  *   <dt>play.http.forwarded.trustXForwardedSsl</dt>
  *   <dd>
  *     Whether one trusted <code>X-Forwarded-Ssl</code> value supplies the
@@ -210,7 +216,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
     scan(
       rawRemote,
       initialScheme,
-      initialAuthority,
+      configuration.xForwardedAuthority(rawRemote, headers, initialAuthority),
       acceptedPath = Nil
     )
   }
@@ -257,6 +263,7 @@ private[server] object ForwardedHeaderHandler {
       trustSingleXForwardedProto: Boolean = false,
       trustForwardedHost: Boolean = false,
       trustXForwardedProtoWithoutXForwardedFor: Boolean = false,
+      trustXForwardedHost: Boolean = false,
       trustXForwardedSsl: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
@@ -426,6 +433,21 @@ private[server] object ForwardedHeaderHandler {
         .flatMap(usableForwardedAuthority)
     }
 
+    /** Apply trusted X-Forwarded-Host metadata to the effective request authority. */
+    def xForwardedAuthority(
+        remote: RemoteInfo,
+        headers: Headers,
+        authority: Option[RequestAuthority]
+    ): Option[RequestAuthority] = {
+      if (version == Xforwarded && trustXForwardedHost && isTrustedProxy(remote.node)) {
+        singleXForwardedValue(headers, HeaderNames.X_FORWARDED_HOST)
+          .flatMap(usableForwardedAuthority)
+          .orElse(authority)
+      } else {
+        authority
+      }
+    }
+
     private def usableForwardedAuthority(value: String): Option[RequestAuthority] = {
       RequestAuthority.parse(value).toOption.filter(_.host.render.nonEmpty)
     }
@@ -502,6 +524,7 @@ private[server] object ForwardedHeaderHandler {
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
         config.getOptional[Boolean]("trustForwardedHost").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false),
+        config.getOptional[Boolean]("trustXForwardedHost").getOrElse(false),
         config.getOptional[Boolean]("trustXForwardedSsl").getOrElse(false)
       )
     }

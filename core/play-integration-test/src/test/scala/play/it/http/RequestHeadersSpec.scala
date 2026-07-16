@@ -656,6 +656,49 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "validate the trusted x-forwarded-host with the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedHost" -> true,
+        "play.filters.enabled"                    -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"              -> Seq("public.example")
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Host" -> "public.example"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("public.example")
+      }
+    }
+
+    "reject an x-forwarded-host not accepted by the allowed hosts filter" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"             -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedHost" -> true,
+        "play.filters.enabled"                    -> Seq(classOf[AllowedHostsFilter].getName),
+        "play.filters.hosts.allowed"              -> Seq("internal.example")
+      )((Action, _) => Action { request => Results.Ok(request.host) }) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Host" -> "public.example"),
+            ""
+          )
+        )
+
+        response.status must_== BAD_REQUEST
+      }
+    }
+
     "respect max header value setting" in {
       withServerAndConfig("play.server.max-header-size" -> "64")((Action, _) => Action(Results.Ok)) { port =>
         val responses = BasicHttpClient.makeRequests(port)(

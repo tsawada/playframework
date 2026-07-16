@@ -130,6 +130,10 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
     Map("play.http.forwarded.trustXForwardedSsl" -> b)
   }
 
+  def trustXForwardedHost(b: Boolean) = {
+    Map("play.http.forwarded.trustXForwardedHost" -> b)
+  }
+
   def trustForwardedHost(b: Boolean) = {
     Map("play.http.forwarded.trustForwardedHost" -> b)
   }
