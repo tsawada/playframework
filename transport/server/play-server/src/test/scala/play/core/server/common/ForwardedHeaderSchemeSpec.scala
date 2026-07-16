@@ -1,0 +1,192 @@
+/*
+ * Copyright (C) from 2022 The Play Framework Contributors <https://github.com/playframework>, 2011-2021 Lightbend Inc. <https://www.lightbend.com>
+ */
+
+package play.core.server.common
+
+import java.net.InetAddress
+
+import com.google.common.net.InetAddresses
+import org.specs2.mutable.Specification
+import play.api.mvc.request.NodePort
+import play.api.mvc.request.RemoteInfo
+import play.api.mvc.request.RemoteNode
+import play.api.mvc.request.RequestAuthority
+import play.api.mvc.request.Scheme
+import play.api.mvc.Headers
+import play.api.Configuration
+import play.api.PlayException
+import play.core.server.common.ForwardedHeaderHandler._
+
+class ForwardedHeaderSchemeSpec extends Specification with ForwardedHeaderHandlerSpecSupport {
+  "ForwardedHeaderHandler" should {
+    "use rfc7239 proto without for from a directly trusted proxy" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: proto=https
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "ignore invalid rfc7239 proto without for and retain the effective scheme" in {
+      forwardedResultFrom(
+        handler(version("rfc7239") ++ trustedProxies("127.0.0.1")),
+        expectedResult("127.0.0.1", true),
+        headers("""
+                  |Forwarded: proto=1https
+        """.stripMargin)
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "stop scanning before entries preceding rfc7239 proto without for" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for=203.0.113.43;proto=http, proto=https
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "get first untrusted proxy protocol with rfc7239 with trusted localhost proxy" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for="_gazonk"
+          |Forwarded: For="[2001:db8:cafe::17]:4711"
+          |Forwarded: for=192.0.2.60;proto=http;by=203.0.113.43
+          |Forwarded: for=192.168.1.10, for=127.0.0.1
+        """.stripMargin
+      ) mustEqual expectedResult("192.168.1.10", false)
+    }
+
+    "get first untrusted proxy protocol with rfc7239 with subnet mask" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
+        """
+          |Forwarded: for="_gazonk"
+          |Forwarded: For="[2001:db8:cafe::17]:4711"
+          |Forwarded: for=192.0.2.60;proto=https;by=203.0.113.43
+          |Forwarded: for=192.168.1.10, for=127.0.0.1
+        """.stripMargin
+      ) mustEqual expectedResult(
+        RemoteInfo(
+          RemoteNode.Ip(addr("192.0.2.60"), None),
+          Some(RemoteNode.Ip(addr("203.0.113.43"), None))
+        ),
+        true
+      )
+    }
+
+    "treat rfc7239 proto schemes case-insensitively" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for=203.0.113.43;proto=HtTpS
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "retain a valid custom rfc7239 proto as an insecure effective scheme" in {
+      val forwarding = forwardedRequestToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1"),
+        """
+          |Forwarded: for=203.0.113.43;proto=webcal
+        """.stripMargin
+      )
+
+      forwarding.scheme mustEqual Scheme.parseOrThrow("webcal")
+      forwarding.remote.identity mustEqual "203.0.113.43"
+    }
+
+    "retain the previously verified scheme when the x-forwarded proto list is missing" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "not downgrade an existing HTTPS scheme when the x-forwarded proto list is missing" in {
+      forwardedResultFrom(
+        handler(version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1")),
+        expectedResult(localhost, true),
+        headers("""
+                  |X-Forwarded-For: 203.0.113.43
+        """.stripMargin)
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "treat x-forwarded-proto schemes case-insensitively" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: HtTpS
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "retain the previously verified scheme when the x-forwarded proto list is shorter than the for list" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "retain the previously verified scheme when the proto list is shorter and all addresses are trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0"),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "preserve the last verified rfc7239 scheme when an earlier entry omits proto" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustSingleXForwardedProto(true),
+        """
+          |Forwarded: for=203.0.113.43
+          |Forwarded: for=192.168.1.43;proto=https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "retain the previously verified scheme when the x-forwarded proto list is longer than the for list" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43
+          |X-Forwarded-Proto: https, https, https
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "retain a valid custom x-forwarded proto as the effective scheme" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: smtp
+        """.stripMargin
+      ) mustEqual ForwardedResult(RemoteInfo.ip("203.0.113.43", None), Scheme.parseOrThrow("smtp"))
+    }
+
+    "handle lots of different IPv6 address and proto quoting in x-forwarded-for headers" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded"),
+        """
+          |X-Forwarded-For: 192.0.2.43, "::1", ::1, "[::1]", [::1]
+          |X-Forwarded-Proto: "https", http, http,    "http", http
+        """.stripMargin
+      ) mustEqual expectedResult("192.0.2.43", true)
+    }
+
+  }
+}

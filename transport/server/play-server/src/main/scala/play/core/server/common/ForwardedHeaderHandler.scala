@@ -35,6 +35,10 @@ import ForwardedHeaderHandler._
  * RFC 7239 node identities, by nodes, and numeric or obfuscated node ports
  * are preserved without conflating selected remote metadata with the direct
  * transport connection.
+ *
+ * Trusted protocol metadata advances the effective request scheme independently
+ * of the transport TLS state. Missing or ambiguous protocol metadata retains the
+ * last verified scheme.
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
 
@@ -105,9 +109,12 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
               )
               result(prev, scheme, authority, acceptedPath)
             case Right(parsedEntry) =>
-              val selectedScheme =
-                if (entry.protoString.contains("https")) Scheme.Https else Scheme.Http
+              val selectedScheme = configuration.forwardedScheme(entry).getOrElse(scheme)
               parsedEntry match {
+                case None if configuration.forwardedSchemeWithoutFor(entry).isDefined =>
+                  // Scheme metadata can describe the original request without
+                  // identifying the preceding node. Do not scan earlier elements.
+                  result(prev, selectedScheme, authority, acceptedPath)
                 case None =>
                   ForwardedHeaderHandler.logger.debug(
                     s"Error with info in forwarding header $entry, using $prev instead: No address."
@@ -304,6 +311,20 @@ private[server] object ForwardedHeaderHandler {
     /** Check whether an RFC 7239 obfuscated identifier is a configured trusted proxy. */
     def isTrustedProxyIdentifier(identifier: String): Boolean = {
       version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
+    }
+
+    /** Parse trusted protocol metadata from an element. */
+    def forwardedScheme(entry: ForwardedEntry): Option[Scheme] = {
+      entry.protoString.flatMap(Scheme.parse(_).toOption)
+    }
+
+    /** Interpret trusted protocol metadata that has no forwarded identity. */
+    def forwardedSchemeWithoutFor(entry: ForwardedEntry): Option[Scheme] = {
+      if (entry.addressString.isEmpty && version == Rfc7239) {
+        forwardedScheme(entry)
+      } else {
+        None
+      }
     }
 
   }

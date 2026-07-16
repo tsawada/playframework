@@ -316,6 +316,43 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         }
       }
     }
+
+    "accept an absolute public scheme supplied through a trusted gateway" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { request => Results.Ok(s"${request.scheme.render}|${request.secure}|${request.uri}") }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "https://localhost/path",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=203.0.113.43;proto=https"),
+            ""
+          )
+        )
+
+        response.body must beLeft("https|true|https://localhost/path")
+      }
+    }
+
+    "accept an absolute backend scheme supplied through a trusted gateway" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { request => Results.Ok(s"${request.scheme.render}|${request.secure}|${request.uri}") }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://localhost/path",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=203.0.113.43;proto=https"),
+            ""
+          )
+        )
+
+        response.body must beLeft("https|true|http://localhost/path")
+      }
+    }
+
     "reject a missing Host field in HTTP/1.1 origin-form and absolute-form requests" in {
       withServer((Action, _) => Action(Results.Ok)) { port =>
         Seq("/", "http://localhost/").foreach { target =>
@@ -444,6 +481,26 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         )
 
         response.body must beLeft("true|true|_hidden|true|https")
+      }
+    }
+
+    "use trusted rfc7239 proto without a forwarded identity throughout the request" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { request =>
+          Results.Ok(s"${request.secure}|${Call("GET", "/result").absoluteURL()(using request)}")
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/path",
+            "HTTP/1.1",
+            Map("Forwarded" -> "proto=https"),
+            ""
+          )
+        )
+
+        response.body must beLeft("true|https://localhost/result")
       }
     }
 

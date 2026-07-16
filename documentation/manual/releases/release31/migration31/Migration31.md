@@ -26,6 +26,20 @@ Play now uses Pekko 2 and Pekko HTTP 2. If your build overrides Play's Pekko dep
 
 The deprecated low-level `org.apache.pekko.http.play.WebSocketHandler.handleWebSocket` overloads that accepted Pekko HTTP's old `UpgradeToWebSocket` API have been removed. Code using this internal Pekko HTTP bridge should use the maintained `WebSocketUpgrade` overload instead.
 
+### Missing, invalid, or ambiguous X-Forwarded-Proto retains the last verified scheme
+
+When Play accepts an `X-Forwarded-For` identity but cannot associate it with a valid `X-Forwarded-Proto` value, Play now retains the last verified effective scheme. This applies when the proto value is missing or invalid, and when the `X-Forwarded-For` and `X-Forwarded-Proto` lists cannot be paired according to the configured single-proto policy. The selected remote identity can still change; unverified protocol metadata no longer forces that identity to be insecure.
+
+For example, suppose a trusted proxy connects to Play over TLS and sends:
+
+```http
+X-Forwarded-For: 203.0.113.43
+```
+
+with no `X-Forwarded-Proto`. Play 3.0 selected the forwarded client address but projected the request as insecure, so `request.secure` was `false`. Play now selects the same remote identity while retaining the HTTPS scheme verified from the proxy-to-Play transport, so `request.scheme == Scheme.Https` and `request.secure == true`.
+
+This can change redirect and HSTS behavior, absolute and WebSocket URL generation, CORS same-origin decisions, and application policy that reads `request.secure` or `request.scheme`. If the public client scheme can differ from the proxy-to-Play transport scheme, configure the trusted proxy to emit a valid, correctly aligned `X-Forwarded-Proto` value; otherwise Play can only retain the last scheme it has verified.
+
 ### HEAD responses no longer include generated Content-Length headers
 
 Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.
