@@ -208,6 +208,67 @@ This is configured using `play.http.forwarded.version`, with valid values being 
 
 For more information, please read the [RFC 7239](https://tools.ietf.org/html/rfc7239) specification.
 
+### Choosing the right request metadata
+
+Forwarding separates the client selected from trusted headers from the network connection that directly reached Play. Use the value that answers the application's actual question:
+
+| If you need | Scala API | Java API | Meaning |
+| --- | --- | --- | --- |
+| Selected client identity | `request.remote` | `request.remote()` | May be an IP address, `unknown`, or an RFC 7239 obfuscated identifier. |
+| Selected client IP address | `request.remote.ipAddress` | `request.remote().ipAddress()` | Empty when the selected identity is not an IP address. |
+| Directly connected proxy or client | `request.transport.peer` | `request.transport().peer()` | The socket peer observed by Play, including its source port. Forwarding never changes it. |
+| TLS and peer certificates on the connection to Play | `request.transport.tls` | `request.transport().tls()` | Describes only the connection terminating at Play, not the original client-to-proxy connection. |
+| Effective public request scheme | `request.scheme` or `request.secure` | `request.scheme()` or `request.secure()` | Can come from direct TLS or trusted forwarding metadata. |
+| Effective public host and destination port | `request.authority` or `request.host` | `request.authority()` or `request.host()` | Used by request-aware URL generation, CORS, and the allowed hosts filter. |
+| Accepted forwarding path | `request.remote.path` and `request.remote.forwarding` | `request.remote().path()` and `request.remote().forwarding()` | Contains only the forwarding elements accepted up to the configured trust boundary. |
+| Exact received forwarding text | `request.headers` | `request.getHeaders()` | Use only for auditing or protocol diagnostics, not instead of the normalized trusted values above. |
+
+### Minimal forwarded-header configurations
+
+Every recipe below assumes that clients cannot connect directly to Play and that the first trusted proxy removes all client-supplied `Forwarded` and `X-Forwarded-*` fields before writing authoritative values.
+
+#### One trusted proxy using X-Forwarded-For and X-Forwarded-Proto
+
+Use this when the proxy preserves the public `Host` field and sends one `X-Forwarded-For` and matching `X-Forwarded-Proto` value:
+
+```hocon
+play.http.forwarded {
+  version = "x-forwarded"
+  trustedProxies = ["10.0.0.10"]
+}
+```
+
+The proxy at `10.0.0.10` must be the only client able to reach Play on the application port. Play selects the client from `X-Forwarded-For`, the effective scheme from the corresponding `X-Forwarded-Proto`, and the authority from the preserved `Host` field.
+
+#### One trusted proxy that rewrites the Host field
+
+Use this when the proxy sends Play an internal `Host` field and supplies the public destination separately:
+
+```hocon
+play.http.forwarded {
+  version = "x-forwarded"
+  trustedProxies = ["10.0.0.10"]
+  trustXForwardedHost = true
+  trustXForwardedPort = true
+}
+```
+
+The proxy must set exactly one unambiguous `X-Forwarded-Host` and `X-Forwarded-Port`, in addition to its sanitized client and scheme headers. If `X-Forwarded-Host` already contains the intended public port, omit `trustXForwardedPort` and the separate port header. Configure the allowed hosts filter with the resulting public authority.
+
+#### Multiple trusted proxies using RFC 7239
+
+Use RFC 7239 when multiple controlled proxies need to keep each hop's identity, scheme, and optional host together:
+
+```hocon
+play.http.forwarded {
+  version = "rfc7239"
+  trustedProxies = ["10.0.0.10", "10.0.0.11"]
+  trustForwardedHost = true
+}
+```
+
+The first proxy must remove incoming forwarding fields, and each trusted proxy must append its own `Forwarded` element without changing older sanitized elements. Omit `trustForwardedHost` when the proxy chain preserves the public `Host` field or the application does not need forwarded authority. Protect every proxy-to-proxy and proxy-to-Play hop as described in [Securing the forwarding boundary](#securing-the-forwarding-boundary).
+
 ### Forwarded header examples
 
 The examples below assume that the immediate TCP connection to Play comes from `127.0.0.1`, which is trusted by default. Scala API names are shown; the corresponding Java values are available through `request.remote()`, `request.scheme()`, and `request.authority()`.
