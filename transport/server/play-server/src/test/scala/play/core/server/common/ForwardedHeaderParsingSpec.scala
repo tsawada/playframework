@@ -35,6 +35,25 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
       handler(version("rfc7240")) must throwA[PlayException]
     }
 
+    "reject invalid trusted-proxy addresses and CIDR prefixes during configuration" in {
+      val invalid = Seq(
+        "127.0.0.1/-1",
+        "127.0.0.1/33",
+        "127.0.0.1/99999999999",
+        "127.0.0.1/",
+        "127.0.0.1/+1",
+        "::1/-1",
+        "::1/129",
+        "fe80::1%1",
+        "fe80::1%eth0",
+        "fe80::1%25eth0",
+        "１２７.０.０.１",
+        "١٢٧.٠.٠.١"
+      )
+
+      invalid.forall(value => scala.util.Try(handler(trustedProxies(value))).isFailure) must beTrue
+    }
+
     "not inspect malformed forwarding headers from an untrusted direct peer" in {
       val rawRemote        = RemoteInfo.ip("127.0.0.1", Some(NodePort.Numeric(53124)))
       val initialAuthority = Some(RequestAuthority.parseOrThrow("internal.example:9000"))
