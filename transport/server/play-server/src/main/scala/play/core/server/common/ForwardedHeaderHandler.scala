@@ -5,11 +5,12 @@
 package play.core.server.common
 
 import java.net.InetAddress
-import java.security.cert.X509Certificate
 
 import scala.annotation.tailrec
 
-import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.RemoteInfo
+import play.api.mvc.request.RequestAuthority
+import play.api.mvc.request.Scheme
 import play.api.mvc.Headers
 import play.api.Configuration
 import play.api.Logger
@@ -57,69 +58,38 @@ import ForwardedHeaderHandler._
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
 
-  /**
-   * Update connection information based on any forwarding information in the headers.
-   *
-   * @param rawConnection The raw connection that connected to the Play server.
-   * @param headers The request headers.
-   * @return An updated connection
-   */
-  def forwardedConnection(rawConnection: RemoteConnection, headers: Headers): RemoteConnection = new RemoteConnection {
-    // All public methods delegate to the lazily calculated connection info
-    override def remoteAddress: InetAddress                           = parsed.remoteAddress
-    override def secure: Boolean                                      = parsed.secure
-    override def clientCertificateChain: Option[Seq[X509Certificate]] = parsed.clientCertificateChain
+  /** Update selected remote, scheme, and authority metadata from trusted forwarding headers. */
+  def forwardedRequest(
+      rawRemote: RemoteInfo,
+      headers: Headers,
+      scheme: Scheme,
+      authority: Option[RequestAuthority]
+  ): ParsedForwarding = {
+    val headerEntries = configuration.forwardedHeaders(headers).reverseIterator
 
-    /**
-     * Perform header parsing lazily, yielding a RemoteConnection with the results.
-     */
-    private lazy val parsed: RemoteConnection = {
-      // Use a mutable iterator for performance when scanning the
-      // header entries. Go through the headers in reverse order because
-      // the nearest proxies will be at the end of the list and we need
-      // to move backwards through the list to get to the original IP.
-      val headerEntries: Iterator[ForwardedEntry] = configuration.forwardedHeaders(headers).reverseIterator
-
-      @tailrec
-      def scan(prev: RemoteConnection): RemoteConnection = {
-        // Check if there's a forwarded header for us to scan.
-        if (headerEntries.hasNext) {
-          // There is a forwarded header from 'prev', so lets check if 'prev' is trusted.
-          // If it's a trusted proxy then process the header, otherwise just use 'prev'.
-
-          if (configuration.isTrustedProxy(prev.remoteAddress)) {
-            // 'prev' is a trusted proxy, so we process the next entry.
-            val entry = headerEntries.next()
-            configuration.parseEntry(entry) match {
-              case Left(error) =>
-                ForwardedHeaderHandler.logger.debug(
-                  s"Error with info in forwarding header $entry, using $prev instead: $error."
-                )
-                prev
-              case Right(parsedEntry) =>
-                scan(
-                  RemoteConnection(
-                    parsedEntry.address,
-                    parsedEntry.secure,
-                    None /* No cert chain for forward headers */
-                  )
-                )
-            }
-          } else {
-            // 'prev' is not a trusted proxy, so we don't scan ahead in the list of
-            // forwards, we just return 'prev'.
-            prev
-          }
-        } else {
-          // No more headers to process, so just use its address.
-          prev
+    @tailrec
+    def scan(previous: ParsedForwarding): ParsedForwarding = {
+      if (headerEntries.hasNext && previous.remote.ipAddress.exists(configuration.isTrustedProxy)) {
+        val entry = headerEntries.next()
+        configuration.parseEntry(entry) match {
+          case Left(error) =>
+            ForwardedHeaderHandler.logger.debug(
+              s"Error with info in forwarding header $entry, using $previous instead: $error."
+            )
+            previous
+          case Right(parsedEntry) =>
+            scan(
+              ParsedForwarding(
+                RemoteInfo.ip(parsedEntry.address, None),
+                if (parsedEntry.secure) Scheme.Https else Scheme.Http,
+                authority
+              )
+            )
         }
-      }
-
-      // Start scanning through connections starting at the rawConnection that
-      // was made the Play server.
-      scan(rawConnection)
+      } else previous
     }
+
+    scan(ParsedForwarding(rawRemote, scheme, authority))
   }
 }
 
@@ -145,6 +115,13 @@ private[server] object ForwardedHeaderHandler {
    * Basic information about an HTTP connection, parsed from a ForwardedEntry.
    */
   final case class ParsedForwardedEntry(address: InetAddress, secure: Boolean)
+
+  /** Effective request metadata selected by trusted forwarding information. */
+  final case class ParsedForwarding(
+      remote: RemoteInfo,
+      scheme: Scheme,
+      authority: Option[RequestAuthority]
+  )
 
   case class ForwardedHeaderHandlerConfig(version: ForwardedHeaderVersion, trustedProxies: List[Subnet]) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)

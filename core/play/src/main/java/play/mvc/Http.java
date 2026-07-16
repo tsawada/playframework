@@ -7,6 +7,7 @@ package play.mvc;
 import static play.core.formatters.Multipart.escapeParamWithHTML5Strategy;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.net.InetAddresses;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
@@ -720,6 +721,27 @@ public class Http {
     }
 
     /**
+     * @return metadata about the network connection directly terminating at Play
+     */
+    default TransportConnection transport() {
+      return asScala().transport().asJava();
+    }
+
+    /**
+     * @return the normalized effective request scheme
+     */
+    default Scheme scheme() {
+      return asScala().scheme().asJava();
+    }
+
+    /**
+     * @return the normalized effective request authority, if present
+     */
+    default Optional<RequestAuthority> authority() {
+      return OptionConverters.toJava(asScala().authority()).map(value -> value.asJava());
+    }
+
+    /**
      * @return The complete request URI, containing both path and query string
      */
     String uri();
@@ -735,9 +757,25 @@ public class Http {
     String version();
 
     /**
-     * @return true if the client is using SSL
+     * The selected remote metadata for this request.
+     *
+     * <p>This may identify an IP address, an RFC 7239 obfuscated identity, or RFC 7239 {@code
+     * unknown}. Direct transport peer and TLS metadata are exposed separately by {@link
+     * #transport()}.
+     *
+     * @return the selected remote metadata
      */
-    boolean secure();
+    default RemoteInfo remote() {
+      return asScala().remote().asJava();
+    }
+
+    /**
+     * @return true when the normalized effective request scheme is HTTPS, including when selected
+     *     from trusted forwarding metadata
+     */
+    default boolean secure() {
+      return scheme().isSecure();
+    }
 
     /**
      * @return a map of typed attributes associated with the request.
@@ -814,9 +852,15 @@ public class Http {
     Request withBody(RequestBody body);
 
     /**
-     * @return the request host
+     * Returns the effective request host, optionally including its port. Trusted forwarding
+     * information selected by the server takes precedence over the request-target authority and the
+     * {@code Host} header. This does not modify {@link #uri()} or {@link #path()}.
+     *
+     * @return the effective request host
      */
-    String host();
+    default String host() {
+      return authority().map(RequestAuthority::render).orElse("");
+    }
 
     /**
      * @return the URI path
@@ -1125,10 +1169,18 @@ public class Http {
      * @param requestFactory the incoming request factory
      */
     public RequestBuilder(RequestFactory requestFactory) {
+      play.api.mvc.request.PeerEndpoint peer =
+          PeerEndpoint$.MODULE$.create(
+              InetAddresses.forString("127.0.0.1"), OptionConverters.toScala(Optional.empty()));
+      play.api.mvc.request.TransportConnection transport =
+          TransportConnection$.MODULE$.create(peer, OptionConverters.toScala(Optional.empty()));
+      play.api.mvc.request.RemoteInfo remote = RemoteInfo$.MODULE$.fromPeer(peer);
       req =
           requestFactory.createRequest(
-              RemoteConnection$.MODULE$.apply(
-                  "127.0.0.1", false, OptionConverters.toScala(Optional.empty())),
+              transport,
+              remote,
+              play.api.mvc.request.Scheme$.MODULE$.Http(),
+              OptionConverters.toScala(Optional.empty()),
               "GET",
               RequestTarget$.MODULE$.apply("/", "/", Map$.MODULE$.empty()),
               "HTTP/1.1",
@@ -1580,13 +1632,21 @@ public class Http {
       return req.uri();
     }
 
+    /**
+     * Sets the request target URI without changing the effective {@link #scheme()} or {@link
+     * #authority()}.
+     *
+     * @param uri the request target URI
+     * @return the builder instance
+     */
     public RequestBuilder uri(URI uri) {
       req = JavaHelpers$.MODULE$.updateRequestWithUri(req, uri);
       return this;
     }
 
     /**
-     * Sets the uri.
+     * Sets the request target URI without changing the effective {@link #scheme()} or {@link
+     * #authority()}.
      *
      * @param str the uri
      * @return the builder instance
@@ -1601,40 +1661,74 @@ public class Http {
     }
 
     /**
-     * @param secure true if the request is secure
+     * @return the normalized effective request scheme.
+     */
+    public Scheme scheme() {
+      return req.scheme().asJava();
+    }
+
+    /**
+     * @param scheme the effective request scheme
+     * @return the builder instance
+     */
+    public RequestBuilder scheme(Scheme scheme) {
+      req = req.withScheme(scheme.asScala());
+      return this;
+    }
+
+    /**
+     * @return the normalized effective request authority, if present.
+     */
+    public Optional<RequestAuthority> authority() {
+      return OptionConverters.toJava(req.authority()).map(value -> value.asJava());
+    }
+
+    /**
+     * @param authority the effective request authority
+     * @return the builder instance
+     */
+    public RequestBuilder authority(RequestAuthority authority) {
+      return authority(Optional.of(authority));
+    }
+
+    /**
+     * @param authority the effective request authority, or empty to remove it
+     * @return the builder instance
+     */
+    public RequestBuilder authority(Optional<RequestAuthority> authority) {
+      Objects.requireNonNull(authority, "authority");
+      req = req.withAuthority(OptionConverters.toScala(authority.map(RequestAuthority::asScala)));
+      return this;
+    }
+
+    /**
+     * @param secure true to use the HTTPS scheme, false to use HTTP
      * @return the builder instance
      */
     public RequestBuilder secure(boolean secure) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  req.connection().remoteAddress(),
-                  secure,
-                  req.connection().clientCertificateChain()));
-      return this;
+      return scheme(secure ? Scheme.HTTPS : Scheme.HTTP);
     }
 
     /**
      * @return the status if the request is secure
      */
     public boolean secure() {
-      return req.connection().secure();
+      return req.secure();
     }
 
     /**
-     * @return the host name from the header
+     * @return the normalized effective host, or an empty string when the request has no authority
      */
     public String host() {
-      return headers().get(HeaderNames.HOST).orElse(null);
+      return req.host();
     }
 
     /**
-     * @param host sets the host in the header
+     * @param host parses and sets the effective authority and its canonical Host header
      * @return the builder instance
      */
     public RequestBuilder host(String host) {
-      header(HeaderNames.HOST, host);
-      return this;
+      return authority(RequestAuthority.parse(host));
     }
 
     /**
@@ -1651,23 +1745,7 @@ public class Http {
      * @return the builder instance
      */
     public RequestBuilder path(String path) {
-      // Update URI with new path element
-      URI existingUri = req.target().uri();
-      URI newUri;
-      try {
-        newUri =
-            new URI(
-                existingUri.getScheme(),
-                existingUri.getUserInfo(),
-                existingUri.getHost(),
-                existingUri.getPort(),
-                path,
-                existingUri.getQuery(),
-                existingUri.getFragment());
-      } catch (URISyntaxException e) {
-        throw new IllegalArgumentException("New path couldn't be parsed", e);
-      }
-      uri(newUri);
+      req = JavaHelpers$.MODULE$.updateRequestWithPath(req, path);
       return this;
     }
 
@@ -1703,7 +1781,9 @@ public class Http {
     }
 
     /**
-     * Set the headers to be used by the request builder.
+     * Set the headers to be used by the request builder. This operation cannot change the effective
+     * authority: a missing Host header is restored from {@link #authority()}, while a conflicting
+     * or duplicate Host header is rejected. Use {@link #authority(RequestAuthority)} to change it.
      *
      * @param headers the headers to be replaced
      * @return the builder instance
@@ -1816,6 +1896,38 @@ public class Http {
     public RequestBuilder session(Map<String, String> data) {
       play.api.mvc.Session session = new play.api.mvc.Session(Scala.asScala(data));
       attr(new TypedKey<>(RequestAttrKey.Session()), new AssignedCell<>(session));
+      return this;
+    }
+
+    /**
+     * @return the selected remote metadata
+     */
+    public RemoteInfo remote() {
+      return req.remote().asJava();
+    }
+
+    /**
+     * @param remote sets the selected remote metadata
+     * @return the builder instance
+     */
+    public RequestBuilder remote(RemoteInfo remote) {
+      req = req.withRemote(remote.asScala());
+      return this;
+    }
+
+    /**
+     * @return metadata about the network connection directly terminating at Play
+     */
+    public TransportConnection transport() {
+      return req.transport().asJava();
+    }
+
+    /**
+     * @param transport sets the direct transport metadata
+     * @return the builder instance
+     */
+    public RequestBuilder transport(TransportConnection transport) {
+      req = req.withTransport(transport.asScala());
       return this;
     }
 

@@ -13,13 +13,13 @@ import scala.reflect.ClassTag
 import com.typesafe.config.ConfigFactory
 import jakarta.inject.Inject
 import org.specs2.matcher.MatchResult
-import play.api.http.HeaderNames
 import play.api.http.HttpErrorHandler
 import play.api.http.HttpFilters
 import play.api.inject._
 import play.api.inject.guice.GuiceApplicationBuilder
 import play.api.libs.ws._
 import play.api.mvc._
+import play.api.mvc.request.RequestAuthority
 import play.api.mvc.Handler.Stage
 import play.api.mvc.Results._
 import play.api.routing.HandlerDef
@@ -57,9 +57,12 @@ class AllowedHostsFilterSpec extends PlaySpecification {
       uri: String = "/",
       headers: Seq[(String, String)] = Seq()
   ) = {
-    val req = FakeRequest(method = "GET", path = uri)
-      .withHeaders(headers*)
-      .withHeaders(HOST -> hostHeader)
+    val req = FakeRequest(
+      method = "GET",
+      uri = uri,
+      headers = Headers((headers :+ (HOST -> hostHeader))*),
+      body = AnyContentAsEmpty
+    )
     route(app, req).get
   }
 
@@ -158,7 +161,7 @@ class AllowedHostsFilterSpec extends PlaySpecification {
     ) { app =>
       status(request(app, "")) must_== OK
       statusBadRequest(app, "example.net")
-      status(route(app, FakeRequest().withHeaders(HeaderNames.HOST -> "")).get) must_== OK
+      status(route(app, FakeRequest().withAuthority(Some(RequestAuthority.parseOrThrow("")))).get) must_== OK
     }
 
     "support host headers with ports" in withApplication(
@@ -205,14 +208,11 @@ class AllowedHostsFilterSpec extends PlaySpecification {
 
     // See https://www.skeletonscribe.net/2013/05/practical-http-host-header-attacks.html
 
-    "not allow malformed ports" in withApplication(
-      okWithHost,
-      """
-        |play.filters.hosts.allowed = [".mozilla.org"]
-      """.stripMargin
-    ) { app =>
-      statusBadRequest(app, "addons.mozilla.org:@passwordreset.net")
-      statusBadRequest(app, "addons.mozilla.org: www.securepasswordreset.com")
+    "not match malformed ports" in {
+      val matcher = HostMatcher(".mozilla.org")
+
+      matcher("addons.mozilla.org:@passwordreset.net") must beFalse
+      matcher("addons.mozilla.org: www.securepasswordreset.com") must beFalse
     }
 
     "validate hosts in absolute URIs" in withApplication(

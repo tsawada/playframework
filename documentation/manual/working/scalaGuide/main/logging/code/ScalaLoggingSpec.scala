@@ -115,7 +115,9 @@ class ScalaLoggingSpec extends Specification {
           extends ActionBuilderImpl(parser) {
         val accessLogger                                                                        = Logger("access")
         override def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[Result]) = {
-          accessLogger.info(s"method=${request.method} uri=${request.uri} remote-address=${request.remoteAddress}")
+          accessLogger.info(
+            s"method=${request.method} uri=${request.uri} remote-identity=${request.remote.identity}"
+          )
           block(request)
         }
       }
@@ -167,8 +169,9 @@ class ScalaLoggingSpec extends Specification {
           val resultFuture = next(request)
 
           resultFuture.foreach(result => {
-            val msg = s"method=${request.method} uri=${request.uri} remote-address=${request.remoteAddress}" +
-              s" status=${result.header.status}";
+            val msg =
+              s"method=${request.method} uri=${request.uri} remote-identity=${request.remote.identity}" +
+                s" status=${result.header.status}";
             accessLogger.info(msg)
           })
 

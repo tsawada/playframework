@@ -13,7 +13,8 @@ import play.api.http.HttpFilters
 import play.api.inject.bind
 import play.api.inject.guice.GuiceApplicationBuilder
 import play.api.mvc._
-import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.RequestAuthority
+import play.api.mvc.request.Scheme
 import play.api.mvc.Handler.Stage
 import play.api.mvc.Results._
 import play.api.routing.HandlerDef
@@ -71,8 +72,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
 
     "not redirect when on http in test" in new WithApplication(buildApp(mode = Mode.Test)) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -83,8 +83,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       buildApp("play.filters.https.redirectEnabled = true", mode = Mode.Test)
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -93,8 +92,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
 
     "not redirect when on https but send HSTS header" in new WithApplication(buildApp(mode = Mode.Prod)) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = true, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Https)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=31536000; includeSubDomains")
         status(result) must_== OK
@@ -110,8 +108,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure).withHeaders("X-Forwarded-Proto" -> "https")).get
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "https")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=31536000; includeSubDomains")
         status(result) must_== OK
@@ -130,8 +127,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
 
     "not contain default HSTS header if secure in test" in new WithApplication(buildApp(mode = Mode.Test)) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = true, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Https)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
       }
@@ -139,8 +135,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
 
     "contain default HSTS header if secure in production" in new WithApplication(buildApp(mode = Mode.Prod)) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = true, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Https)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=31536000; includeSubDomains")
       }
@@ -155,8 +150,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = true, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Https)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=12345; includeSubDomains")
       }
@@ -172,8 +166,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -189,8 +182,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure)).get
+        val result = route(app, request().withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -206,8 +198,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure).withHeaders("X-Forwarded-Proto" -> "http")).get
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -224,8 +215,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request().withConnection(secure).withHeaders("X-Forwarded-Proto" -> "https")).get
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "https")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=31536000; includeSubDomains")
         status(result) must_== OK
@@ -243,8 +233,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/skip").withConnection(secure).withHeaders("X-Forwarded-Proto" -> "http")).get
+        val result = route(app, request("/skip").withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -262,10 +251,9 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
         val result = route(
           app,
-          request("/skip", Some("foo=bar")).withConnection(secure).withHeaders("X-Forwarded-Proto" -> "http")
+          request("/skip", Some("foo=bar")).withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")
         ).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
@@ -283,9 +271,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val insecure =
-          RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/modifiers").withConnection(insecure)).get
+        val result = route(app, request("/modifiers").withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -302,9 +288,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val insecure =
-          RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/modifiers").withConnection(insecure)).get
+        val result = route(app, request("/modifiers").withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -322,8 +306,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/modifiers").withConnection(secure)).get
+        val result = route(app, request("/modifiers").withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -341,8 +324,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/modifiers").withConnection(secure)).get
+        val result = route(app, request("/modifiers").withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -360,8 +342,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val secure = RemoteConnection(remoteAddressString = "127.0.0.1", secure = false, clientCertificateChain = None)
-        val result = route(app, request("/modifiers").withConnection(secure)).get
+        val result = route(app, request("/modifiers").withScheme(Scheme.Http)).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -371,7 +352,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
 
   private def request(path: String = "/", queryParams: Option[String] = None) = {
     FakeRequest(method = "GET", path = path + queryParams.map("?" + _).getOrElse(""))
-      .withHeaders(HOST -> "playframework.com")
+      .withAuthority(Some(RequestAuthority.parseOrThrow("playframework.com")))
   }
 
   def inject[T: ClassTag](implicit app: Application) = app.injector.instanceOf[T]

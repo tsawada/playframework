@@ -5,11 +5,11 @@
 package play.core.test
 
 import java.net.URI
-import java.security.cert.X509Certificate
 
 import scala.concurrent.Future
 import scala.xml.NodeSeq
 
+import com.google.common.net.InetAddresses
 import org.apache.pekko.util.ByteString
 import play.api.http.HttpConfiguration
 import play.api.libs.json.JsValue
@@ -36,16 +36,25 @@ case class FakeHeaders(data: Seq[(String, String)] = Seq.empty) extends Headers(
  * @tparam A the body content type.
  */
 class FakeRequest[+A](request: Request[A]) extends Request[A] {
-  override def connection: RemoteConnection = request.connection
-  override def method: String               = request.method
-  override def target: RequestTarget        = request.target
-  override def version: String              = request.version
-  override def headers: Headers             = request.headers
-  override def body: A                      = request.body
-  override def attrs: TypedMap              = request.attrs
+  override def transport: TransportConnection      = request.transport
+  override def remote: RemoteInfo                  = request.remote
+  override def scheme: Scheme                      = request.scheme
+  override def authority: Option[RequestAuthority] = request.authority
+  override def method: String                      = request.method
+  override def target: RequestTarget               = request.target
+  override def version: String                     = request.version
+  override def headers: Headers                    = request.headers
+  override def body: A                             = request.body
+  override def attrs: TypedMap                     = request.attrs
 
-  override def withConnection(newConnection: RemoteConnection): FakeRequest[A] =
-    new FakeRequest(request.withConnection(newConnection))
+  override def withRemote(newRemote: RemoteInfo): FakeRequest[A] =
+    new FakeRequest(request.withRemote(newRemote))
+  override def withTransport(newTransport: TransportConnection): FakeRequest[A] =
+    new FakeRequest(request.withTransport(newTransport))
+  override def withScheme(newScheme: Scheme): FakeRequest[A] =
+    new FakeRequest(request.withScheme(newScheme))
+  override def withAuthority(newAuthority: Option[RequestAuthority]): FakeRequest[A] =
+    new FakeRequest(request.withAuthority(newAuthority))
   override def withMethod(newMethod: String): FakeRequest[A] =
     new FakeRequest(request.withMethod(newMethod))
   override def withTarget(newTarget: RequestTarget): FakeRequest[A] =
@@ -184,23 +193,30 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
       uri: String,
       headers: Headers,
       body: A,
-      remoteAddress: String = "127.0.0.1",
+      transport: TransportConnection = defaultTransport,
+      remote: RemoteInfo = defaultRemote,
+      scheme: Scheme = Scheme.Http,
       version: String = "HTTP/1.1",
       id: Long = 666,
-      secure: Boolean = false,
-      clientCertificateChain: Option[Seq[X509Certificate]] = None,
       attrs: TypedMap = TypedMap.empty
   ): FakeRequest[A] = {
-    val _uri                = uri
+    val _uri   = uri
+    val target = new RequestTarget {
+      override lazy val uri: URI                           = new URI(uriString)
+      override def uriString: String                       = _uri
+      override lazy val path                               = uriString.split('?').take(1).mkString
+      override lazy val queryMap: Map[String, Seq[String]] = FormUrlEncodedParser.parse(queryString)
+    }
+    val authority = RequestHeader
+      .initialAuthority(method, target, headers)
+      .fold(error => throw new IllegalArgumentException(error), identity)
     val request: Request[A] = requestFactory.createRequest(
-      RemoteConnection(remoteAddress, secure, clientCertificateChain),
+      transport,
+      remote,
+      scheme,
+      authority,
       method,
-      new RequestTarget {
-        override lazy val uri: URI                           = new URI(uriString)
-        override def uriString: String                       = _uri
-        override lazy val path                               = uriString.split('?').take(1).mkString
-        override lazy val queryMap: Map[String, Seq[String]] = FormUrlEncodedParser.parse(queryString)
-      },
+      target,
       version,
       headers,
       attrs.updated(RequestAttrKey.Id -> id),
@@ -208,4 +224,8 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
     )
     new FakeRequest(request)
   }
+
+  private val defaultTransport: TransportConnection =
+    TransportConnection(PeerEndpoint(InetAddresses.forString("127.0.0.1"), None), None)
+  private val defaultRemote: RemoteInfo = RemoteInfo.fromPeer(defaultTransport.peer)
 }

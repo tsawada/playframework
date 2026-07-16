@@ -47,12 +47,12 @@ class IPFilter @Inject() (config: IPFilterConfig, httpErrorHandler: HttpErrorHan
     if (this.config.ipAllowed(req)) {
       next(req)
     } else {
-      logger.warn(s"Access denied to ${req.path} for IP ${req.remoteAddress}.")
+      logger.warn(s"Access denied to ${req.path} for remote identity ${req.remote.identity}.")
       Accumulator.done(
         httpErrorHandler.onClientError(
           req.addAttr(HttpErrorHandler.Attrs.HttpErrorInfo, HttpErrorInfo("ip-filter")),
           this.config.accessDeniedHttpStatusCode,
-          s"IP not allowed: ${req.remoteAddress}"
+          s"Remote identity not allowed: ${req.remote.identity}"
         )
       )
     }
@@ -86,16 +86,13 @@ object IPFilterConfig {
      * You can easily test this in jshell with java.net.InetAddress.getByName("<ip>").getAddress();
      */
     @inline def allowIP(req: RequestHeader): Boolean = {
-      if (whiteList.isEmpty) {
-        if (blackList.isEmpty) {
-          true // default case, both whitelist and blacklist are empty so all IPs are allowed.
-        } else {
-          // The blacklist is defined, so we accept the IP if it's not blacklisted.
-          blackList.forall(!JArrays.equals(_, req.connection.remoteAddress.getAddress))
-        }
-      } else {
-        // The whitelist is defined. We accept the IP if there is a matching whitelist entry.
-        whiteList.exists(JArrays.equals(_, req.connection.remoteAddress.getAddress))
+      req.remote.ipAddress match {
+        case Some(address) if whiteList.nonEmpty =>
+          whiteList.exists(JArrays.equals(_, address.getAddress))
+        case Some(address) if blackList.nonEmpty =>
+          blackList.forall(!JArrays.equals(_, address.getAddress))
+        case Some(_) => true
+        case None    => whiteList.isEmpty
       }
     }
 

@@ -8,6 +8,7 @@ import java.net.URI
 
 import scala.xml.NodeSeq
 
+import com.google.common.net.InetAddresses
 import org.apache.pekko.util.ByteString
 import play.api.http.HeaderNames
 import play.api.http.HttpConfiguration
@@ -33,12 +34,31 @@ case class FakeHeaders(data: Seq[(String, String)] = Seq.empty) extends Headers(
  * @tparam A the body content type.
  */
 class FakeRequest[+A](request: Request[A]) extends Request[A] {
-  override def method: String               = request.method
-  override def target: RequestTarget        = request.target
-  override def version: String              = request.version
-  override def headers: Headers             = request.headers
-  override def body: A                      = request.body
-  override def attrs: TypedMap              = request.attrs
+  override def transport: TransportConnection      = request.transport
+  override def remote: RemoteInfo                  = request.remote
+  override def scheme: Scheme                      = request.scheme
+  override def authority: Option[RequestAuthority] = request.authority
+  override def method: String                      = request.method
+  override def target: RequestTarget               = request.target
+  override def version: String                     = request.version
+  override def headers: Headers                    = request.headers
+  override def body: A                             = request.body
+  override def attrs: TypedMap                     = request.attrs
+
+  override def withRemote(newRemote: RemoteInfo): FakeRequest[A] =
+    new FakeRequest(request.withRemote(newRemote))
+  override def withTransport(newTransport: TransportConnection): FakeRequest[A] =
+    new FakeRequest(request.withTransport(newTransport))
+  override def withScheme(newScheme: Scheme): FakeRequest[A] =
+    new FakeRequest(request.withScheme(newScheme))
+  override def withAuthority(newAuthority: Option[RequestAuthority]): FakeRequest[A] =
+    new FakeRequest(request.withAuthority(newAuthority))
+
+  /**
+   * Constructs a new request with the given numeric port on its selected remote node.
+   */
+  def withRemotePort(remotePort: Option[Int]): FakeRequest[A] =
+    withRemote(remote.withPort(remotePort))
 
   override def withMethod(newMethod: String): FakeRequest[A] =
     new FakeRequest(request.withMethod(newMethod))
@@ -180,4 +200,54 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
     )
   }
 
+  /**
+   * @tparam A The body type.
+   * @param method The request HTTP method.
+   * @param uri The request uri.
+   * @param headers The request HTTP headers.
+   * @param body The request body.
+   * @param transport The network connection directly terminating at Play.
+   * @param remote The selected remote node metadata.
+   * @param scheme The effective request scheme.
+   */
+  def apply[A](
+      method: String,
+      uri: String,
+      headers: Headers,
+      body: A,
+      transport: TransportConnection = defaultTransport,
+      remote: RemoteInfo = defaultRemote,
+      scheme: Scheme = Scheme.Http,
+      version: String = "HTTP/1.1",
+      id: Long = 666,
+      attrs: TypedMap = TypedMap.empty
+  ): FakeRequest[A] = {
+    val _uri   = uri
+    val target = new RequestTarget {
+      override lazy val uri: URI                           = new URI(uriString)
+      override def uriString: String                       = _uri
+      override lazy val path: String                       = uriString.split('?').take(1).mkString
+      override lazy val queryMap: Map[String, Seq[String]] = FormUrlEncodedParser.parse(queryString)
+    }
+    val authority = RequestHeader
+      .initialAuthority(method, target, headers)
+      .fold(error => throw new IllegalArgumentException(error), identity)
+    val request: Request[A] = requestFactory.createRequest(
+      transport,
+      remote,
+      scheme,
+      authority,
+      method,
+      target,
+      version,
+      headers,
+      attrs.updated(RequestAttrKey.Id -> id),
+      body
+    )
+    new FakeRequest(request)
+  }
+
+  private val defaultTransport: TransportConnection =
+    TransportConnection(PeerEndpoint(InetAddresses.forString("127.0.0.1"), None), None)
+  private val defaultRemote: RemoteInfo = RemoteInfo.fromPeer(defaultTransport.peer)
 }

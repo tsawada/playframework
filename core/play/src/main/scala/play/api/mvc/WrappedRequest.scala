@@ -5,7 +5,11 @@
 package play.api.mvc
 
 import play.api.libs.typedmap.TypedMap
+import play.api.mvc.request.RemoteInfo
+import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.RequestTarget
+import play.api.mvc.request.Scheme
+import play.api.mvc.request.TransportConnection
 
 /**
  * Wrap an existing request. Useful to extend a request.
@@ -15,12 +19,16 @@ import play.api.mvc.request.RequestTarget
  * methods.
  */
 class WrappedRequest[+A](request: Request[A]) extends Request[A] {
-  override def method: String               = request.method
-  override def target: RequestTarget        = request.target
-  override def version: String              = request.version
-  override def headers: Headers             = request.headers
-  override def body: A                      = request.body
-  override def attrs: TypedMap              = request.attrs
+  override def transport: TransportConnection      = request.transport
+  override def scheme: Scheme                      = request.scheme
+  override def authority: Option[RequestAuthority] = request.authority
+  override def remote: RemoteInfo                  = request.remote
+  override def method: String                      = request.method
+  override def target: RequestTarget               = request.target
+  override def version: String                     = request.version
+  override def headers: Headers                    = request.headers
+  override def body: A                             = request.body
+  override def attrs: TypedMap                     = request.attrs
 
   /**
    * Create a copy of this wrapper, but wrapping a new request.
@@ -29,6 +37,14 @@ class WrappedRequest[+A](request: Request[A]) extends Request[A] {
   protected def newWrapper[B](newRequest: Request[B]): WrappedRequest[B] =
     new WrappedRequest[B](newRequest)
 
+  override def withRemote(newRemote: RemoteInfo): WrappedRequest[A] =
+    newWrapper(request.withRemote(newRemote))
+  override def withTransport(newTransport: TransportConnection): WrappedRequest[A] =
+    newWrapper(request.withTransport(newTransport))
+  override def withScheme(newScheme: Scheme): WrappedRequest[A] =
+    newWrapper(request.withScheme(newScheme))
+  override def withAuthority(newAuthority: Option[RequestAuthority]): WrappedRequest[A] =
+    newWrapper(request.withAuthority(newAuthority))
   override def withMethod(newMethod: String): WrappedRequest[A] =
     newWrapper(request.withMethod(newMethod))
   override def withTarget(newTarget: RequestTarget): WrappedRequest[A] =

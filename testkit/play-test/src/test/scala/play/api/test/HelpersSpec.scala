@@ -8,6 +8,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.Future
 import scala.language.reflectiveCalls
 
+import com.google.common.net.InetAddresses
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.stream.Materializer
@@ -15,6 +16,13 @@ import org.apache.pekko.util.ByteString
 import org.specs2.mutable._
 import play.api.libs.json.Json
 import play.api.mvc._
+import play.api.mvc.request.NodePort
+import play.api.mvc.request.PeerEndpoint
+import play.api.mvc.request.RemoteInfo
+import play.api.mvc.request.RemoteNode
+import play.api.mvc.request.Scheme
+import play.api.mvc.request.TransportConnection
+import play.api.mvc.request.TransportTls
 import play.api.mvc.Results._
 import play.api.test.Helpers._
 import play.twirl.api.Content
@@ -236,6 +244,41 @@ class HelpersSpec extends Specification {
       "return an empty map when there is no query string parameters" in {
         val request = FakeRequest("GET", "/uri", FakeHeaders(), AnyContentAsEmpty)
         request.queryString must beEmpty
+      }
+
+      "set and clear the selected remote port" in {
+        val request = FakeRequest().withRemotePort(Some(12345))
+
+        request.remote.port must beSome(12345)
+
+        val cleared = request.withRemotePort(None)
+        cleared.remote.port must beNone
+      }
+
+      "model transport, selected remote, and scheme independently" in {
+        val transport = TransportConnection(
+          PeerEndpoint(InetAddresses.forString("192.0.2.10"), Some(53124)),
+          Some(TransportTls(Seq.empty))
+        )
+        val remote = RemoteInfo(
+          RemoteNode.Obfuscated("_anonymous", Some(NodePort.Obfuscated("_source"))),
+          Some(RemoteNode.Obfuscated("_edge", None))
+        )
+        val scheme = Scheme.parseOrThrow("web+demo")
+
+        val request = FakeRequest(
+          "GET",
+          "/uri",
+          FakeHeaders(),
+          AnyContentAsEmpty,
+          transport = transport,
+          remote = remote,
+          scheme = scheme
+        )
+
+        request.transport mustEqual transport
+        request.remote mustEqual remote
+        request.scheme mustEqual scheme
       }
 
       "successfully execute a POST request with an empty body" in {

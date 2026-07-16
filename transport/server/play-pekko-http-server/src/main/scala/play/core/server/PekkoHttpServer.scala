@@ -351,7 +351,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       val headers        = modelConversion(tryApp).convertRequestHeadersPekko(decodedRequest)
       val unparsedTarget = Server.createUnparsedRequestTarget(headers.uri)
       val requestHeader  =
-        modelConversion(tryApp).createRequestHeader(headers, secure, remoteAddress, unparsedTarget, request)
+        modelConversion(tryApp).createErrorRequestHeader(headers, secure, remoteAddress, unparsedTarget, request)
       val debugHeader   = attachDebugInfo(requestHeader)
       val maybeEnriched = Server.tryToEnrichHeader(tryApp, debugHeader)
       val result        = errorHandler(tryApp).onClientError(

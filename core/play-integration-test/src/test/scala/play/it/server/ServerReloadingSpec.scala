@@ -260,7 +260,7 @@ private[server] object ServerReloadingSpec {
       case GET(p"/getflash") =>
         action { (request: Request[?]) => Results.Ok(request.flash.data.get("foo").toString) }
       case GET(p"/getremoteaddress") =>
-        action { (request: Request[?]) => Results.Ok(request.remoteAddress) }
+        action { (request: Request[?]) => Results.Ok(request.remote.identity) }
       case GET(p"/getserverconfigcachereloads") =>
         action { (request: Request[?]) =>
           val reloadCount: Option[Int] = request.attrs.get(ServerDebugInfo.Attr).map(_.serverConfigCacheReloads)

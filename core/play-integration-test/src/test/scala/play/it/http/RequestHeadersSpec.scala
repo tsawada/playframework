@@ -13,9 +13,19 @@ import play.api.Mode
 import play.core.server.ServerConfig
 import play.it._
 
-class NettyRequestHeadersSpec extends RequestHeadersSpec with NettyIntegrationSpecification
+class NettyRequestHeadersSpec extends RequestHeadersSpec with NettyIntegrationSpecification {
+  // Netty passes an HTTP/1.0 request without Host through to Play, which retains missing-Host compatibility.
+  protected override val backendPassesHttp10WithoutHostToPlay = true
+  // Netty passes an empty Host on an absolute-form request through to Play, which applies target precedence.
+  protected override val backendPassesAbsoluteTargetWithEmptyHostToPlay = true
+}
 
 class PekkoHttpRequestHeadersSpec extends RequestHeadersSpec with PekkoHttpIntegrationSpecification {
+  // Pekko HTTP rejects a relative request without Host while establishing its effective URI, before Play sees it.
+  protected override val backendPassesHttp10WithoutHostToPlay = false
+  // Pekko HTTP currently rejects an empty Host against an absolute target before Play's request conversion runs.
+  protected override val backendPassesAbsoluteTargetWithEmptyHostToPlay = false
+
   "Pekko HTTP request header handling" should {
     "not complain about invalid User-Agent headers" in {
       // This test modifies the global (!) logger to capture log messages.
@@ -60,6 +70,12 @@ class PekkoHttpRequestHeadersSpec extends RequestHeadersSpec with PekkoHttpInteg
 }
 
 trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecification with HttpHeadersCommonSpec {
+
+  /** Pekko rejects a missing Host while establishing its effective URI, including for HTTP/1.0. */
+  protected def backendPassesHttp10WithoutHostToPlay: Boolean
+
+  /** Whether the backend passes an absolute-form request with an empty Host field to Play. */
+  protected def backendPassesAbsoluteTargetWithEmptyHostToPlay: Boolean
 
   def withServerAndConfig[T](
       configuration: (String, Any)*
@@ -229,6 +245,149 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         "User-Agent",
         """Mozilla/5.0 (iPhone; CPU iPhone OS 11_2_2 like Mac OS X) AppleWebKit/604.4.7 (KHTML, like Gecko) Mobile/15C202 [FBAN/FBIOS;FBAV/155.0.0.36.93;FBBV/87992437;FBDV/iPhone9,3;FBMD/iPhone;FBSN/iOS;FBSV/11.2.2;FBSS/2;FBCR/3Ireland;FBID/phone;FBLC/en_US;FBOP/5;FBRV/0]"""
       )
+    }
+
+    "reject an absolute https target received over untrusted plaintext transport" in {
+      withServer((Action, _) => Action(Results.Ok)) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest("GET", "https://localhost/path", "HTTP/1.1", Map.empty, "")
+        )
+
+        response.status must_== BAD_REQUEST
+      }
+    }
+
+    "use an absolute scheme that matches the direct transport" in {
+      withServer((Action, _) =>
+        Action { request => Results.Ok(s"${request.scheme.render}|${request.host}|${request.uri}") }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest("GET", "http://localhost/path", "HTTP/1.1", Map.empty, "")
+        )
+
+        response.body must beLeft("http|localhost|http://localhost/path")
+      }
+    }
+
+    "normalize an empty absolute-form path while retaining the raw request target and query" in {
+      withServer((Action, _) =>
+        Action { request =>
+          Results.Ok(
+            Seq(
+              request.path,
+              request.asJava.path,
+              request.uri,
+              request.target.queryString,
+              request.getQueryString("key")
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest("GET", "http://localhost?key=value", "HTTP/1.1", Map.empty, "")
+        )
+
+        response.body must beLeft("/|/|http://localhost?key=value|key=value|Some(value)")
+      }
+    }
+
+    "apply an absolute target authority when an empty HTTP/1.1 Host field reaches Play" in {
+      withServer((Action, _) =>
+        Action { request => Results.Ok(s"${request.host}|${request.headers.getAll(HOST).mkString}") }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "http://LOCALHOST/path",
+            "HTTP/1.1",
+            Map(HOST -> ""),
+            "",
+            includeHost = false
+          )
+        )
+
+        if (backendPassesAbsoluteTargetWithEmptyHostToPlay) {
+          response.status must_== OK
+          response.body must beLeft("localhost|localhost")
+        } else {
+          // Pekko HTTP's effective-URI stage currently enforces Host/target equality before Play can apply RFC 9112
+          // target precedence. Keep this raw test so that an upstream fix immediately exercises Play's acceptance.
+          response.status must_== BAD_REQUEST
+        }
+      }
+    }
+    "reject a missing Host field in HTTP/1.1 origin-form and absolute-form requests" in {
+      withServer((Action, _) => Action(Results.Ok)) { port =>
+        Seq("/", "http://localhost/").foreach { target =>
+          val Seq(response) = BasicHttpClient.makeRequests(port)(
+            BasicRequest("GET", target, "HTTP/1.1", Map.empty, "", includeHost = false)
+          )
+          response.status must_== BAD_REQUEST
+        }
+        ok
+      }
+    }
+
+    "reject an invalid single Host field before absolute-form or CONNECT precedence" in {
+      withServer((Action, _) => Action(Results.Ok)) { port =>
+        Seq("GET" -> "http://localhost/", "CONNECT" -> "localhost:443").foreach {
+          case (method, target) =>
+            val Seq(response) = BasicHttpClient.makeRequests(port)(
+              BasicRequest(
+                method,
+                target,
+                "HTTP/1.1",
+                Map(HOST -> "user@ignored.example"),
+                "",
+                includeHost = false
+              )
+            )
+            response.status must_== BAD_REQUEST
+        }
+        ok
+      }
+    }
+
+    "retain HTTP/1.0 compatibility when Host is absent" in {
+      withServerAndConfig("play.filters.hosts.allowed" -> Seq(""))((Action, _) =>
+        Action { request =>
+          Results.Ok(s"${request.version}|${request.authority.isEmpty}|${request.headers.get(HOST)}")
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest("GET", "/", "HTTP/1.0", Map.empty, "", includeHost = false)
+        )
+
+        if (backendPassesHttp10WithoutHostToPlay) {
+          response.body must beLeft("HTTP/1.0|true|None")
+        } else {
+          response.status must_== BAD_REQUEST
+        }
+      }
+    }
+
+    "reject invalid CONNECT request targets" in {
+      withServer((Action, _) => Action(Results.Ok)) { port =>
+        Seq("http://localhost:443", "localhost:0", "localhost:65536").foreach { target =>
+          val Seq(response) = BasicHttpClient.makeRequests(port)(
+            BasicRequest("CONNECT", target, "HTTP/1.1", Map.empty, "")
+          )
+          response.status must_== BAD_REQUEST
+        }
+        ok
+      }
+    }
+
+    "return a stable bad request for userinfo in an absolute authority" in {
+      withServer((Action, _) => Action(Results.Ok)) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port, checkClosed = true)(
+          BasicRequest("GET", "http://user@localhost/path", "HTTP/1.1", Map.empty, "")
+        )
+
+        // HTTP request authorities model host[:port], not userinfo. Strict request conversion rejects
+        // user@localhost, and both server backends must report that validation failure as a stable 400.
+        response.status must_== BAD_REQUEST
+      }
     }
 
     "respect max header value setting" in {

@@ -4,19 +4,16 @@
 
 package play.filters.ip
 
-import java.net.InetAddress
-import java.security.cert.X509Certificate
-
 import scala.concurrent.Future
 
-import com.google.common.net.InetAddresses
 import com.typesafe.config.ConfigFactory
 import jakarta.inject.Inject
 import play.api.http.HttpFilters
 import play.api.inject.bind
 import play.api.inject.guice.GuiceApplicationBuilder
 import play.api.mvc._
-import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.RemoteInfo
+import play.api.mvc.request.RequestAuthority
 import play.api.mvc.Results._
 import play.api.routing.HandlerDef
 import play.api.routing.Router
@@ -513,24 +510,8 @@ class IPFilterSpec extends PlaySpecification {
 
   private def request(path: String, ip: String): FakeRequest[AnyContentAsEmpty.type] = {
     FakeRequest(method = "GET", path = path)
-      .withConnection(new RemoteConnection {
-
-        /**
-         * The remote client's address.
-         */
-        override def remoteAddress: InetAddress = InetAddresses.forString(ip)
-
-        /**
-         * Whether or not the connection was over a secure (e.g. HTTPS) connection.
-         */
-        override def secure: Boolean = false
-
-        /**
-         * The X509 certificate chain presented by a client during SSL requests.
-         */
-        override def clientCertificateChain: Option[Seq[X509Certificate]] = Option.empty
-      })
-      .withHeaders(HOST -> "playframework.com")
+      .withRemote(RemoteInfo.ip(ip, None))
+      .withAuthority(Some(RequestAuthority.parseOrThrow("playframework.com")))
   }
 
   private def buildApp(config: String = ""): Application =

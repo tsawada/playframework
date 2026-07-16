@@ -6,6 +6,7 @@ package play.filters.cors
 
 import scala.concurrent.Future
 
+import play.api.mvc.request.RequestAuthority
 import play.api.mvc.Result
 import play.api.test.FakeRequest
 import play.api.test.PlaySpecification
@@ -23,9 +24,10 @@ trait CORSCommonSpec extends PlaySpecification {
     header(ACCESS_CONTROL_MAX_AGE, result) must beNone
   }
 
-  def fakeRequest(method: String = "GET", path: String = "/") = FakeRequest(method, path).withHeaders(
-    HOST -> "www.example.com"
-  )
+  // Authority is canonical request state. Generic header replacement cannot change Host implicitly;
+  // use withAuthority when a test needs a different effective host.
+  def fakeRequest(method: String = "GET", path: String = "/") =
+    FakeRequest(method, path).withAuthority(Some(RequestAuthority.parseOrThrow("www.example.com")))
 
   def commonTests = {
     "pass through requests without an origin header" in withApplication() { app =>
@@ -39,10 +41,9 @@ trait CORSCommonSpec extends PlaySpecification {
       "with a port number" in withApplication() { app =>
         val result = route(
           app,
-          FakeRequest().withHeaders(
-            ORIGIN -> "http://www.example.com:9000",
-            HOST   -> "www.example.com:9000"
-          )
+          FakeRequest()
+            .withAuthority(Some(RequestAuthority.parseOrThrow("www.example.com:9000")))
+            .withHeaders(ORIGIN -> "http://www.example.com:9000")
         ).get
 
         status(result) must_== OK
@@ -52,10 +53,9 @@ trait CORSCommonSpec extends PlaySpecification {
       "without a port number" in withApplication() { app =>
         val result = route(
           app,
-          FakeRequest().withHeaders(
-            ORIGIN -> "http://www.example.com",
-            HOST   -> "www.example.com"
-          )
+          FakeRequest()
+            .withAuthority(Some(RequestAuthority.parseOrThrow("www.example.com")))
+            .withHeaders(ORIGIN -> "http://www.example.com")
         ).get
 
         status(result) must_== OK
@@ -111,10 +111,9 @@ trait CORSCommonSpec extends PlaySpecification {
     "not consider sub domains to be the same origin" in withApplication() { app =>
       val result = route(
         app,
-        fakeRequest().withHeaders(
-          ORIGIN -> "http://www.example.com",
-          HOST   -> "example.com"
-        )
+        fakeRequest()
+          .withAuthority(Some(RequestAuthority.parseOrThrow("example.com")))
+          .withHeaders(ORIGIN -> "http://www.example.com")
       ).get
 
       status(result) must_== OK
@@ -125,10 +124,9 @@ trait CORSCommonSpec extends PlaySpecification {
     "not consider different ports to be the same origin" in withApplication() { app =>
       val result = route(
         app,
-        fakeRequest().withHeaders(
-          ORIGIN -> "http://www.example.com:9000",
-          HOST   -> "www.example.com:9001"
-        )
+        fakeRequest()
+          .withAuthority(Some(RequestAuthority.parseOrThrow("www.example.com:9001")))
+          .withHeaders(ORIGIN -> "http://www.example.com:9000")
       ).get
 
       status(result) must_== OK
@@ -139,10 +137,9 @@ trait CORSCommonSpec extends PlaySpecification {
     "not consider different protocols to be the same origin" in withApplication() { app =>
       val result = route(
         app,
-        fakeRequest().withHeaders(
-          ORIGIN -> "https://www.example.com:9000",
-          HOST   -> "www.example.com:9000"
-        )
+        fakeRequest()
+          .withAuthority(Some(RequestAuthority.parseOrThrow("www.example.com:9000")))
+          .withHeaders(ORIGIN -> "https://www.example.com:9000")
       ).get
 
       status(result) must_== OK

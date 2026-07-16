@@ -106,13 +106,20 @@ private[play] class PlayRequestHandler(
       ServerDebugInfo.attachToRequestHeader(rh, cacheValues.serverDebugInfo)
     }
 
-    def clientError(statusCode: Int, message: String, bypassErrorHandler: Boolean = false): (RequestHeader, Handler) = {
-      val unparsedTarget = Server.createUnparsedRequestTarget(request.uri)
-      val requestHeader  = modelConversion(tryApp).createRequestHeader(channel, request, unparsedTarget)
-      val debugHeader    = attachDebugInfo(requestHeader)
-      val cleanMessage   = if (message == null) "" else message
-      val maybeEnriched  = Server.tryToEnrichHeader(tryApp, debugHeader)
-      val result         =
+    def clientError(
+        statusCode: Int,
+        message: String,
+        convertedRequestHeader: Option[RequestHeader] = None,
+        bypassErrorHandler: Boolean = false
+    ): (RequestHeader, Handler) = {
+      val requestHeader = convertedRequestHeader.getOrElse {
+        val unparsedTarget = Server.createUnparsedRequestTarget(request.uri)
+        modelConversion(tryApp).createErrorRequestHeader(channel, request, unparsedTarget)
+      }
+      val debugHeader   = attachDebugInfo(requestHeader)
+      val cleanMessage  = if (message == null) "" else message
+      val maybeEnriched = Server.tryToEnrichHeader(tryApp, debugHeader)
+      val result        =
         if (bypassErrorHandler) Future.successful(Results.Status(statusCode)(cleanMessage))
         else
           errorHandler(tryApp).onClientError(
@@ -120,7 +127,7 @@ private[play] class PlayRequestHandler(
             statusCode,
             cleanMessage
           )
-      // If there's a problem in parsing the request, then we should close the connection, once done with it
+      // These paths stop processing before consuming the request body, so close the connection after the error response.
       maybeEnriched -> Server.actionForResult(result.map(_.withHeaders(HeaderNames.CONNECTION -> "close")))
     }
 
@@ -136,7 +143,11 @@ private[play] class PlayRequestHandler(
             .flatMap(clh => catching(classOf[NumberFormatException]).opt(clh.toLong))
             .exists(_ > maxContentLength)
         ) {
-          clientError(Status.REQUEST_ENTITY_TOO_LARGE, "Request Entity Too Large")
+          clientError(
+            Status.REQUEST_ENTITY_TOO_LARGE,
+            "Request Entity Too Large",
+            convertedRequestHeader = Some(untagged)
+          )
         } else {
           val debugHeader: RequestHeader = attachDebugInfo(untagged)
           Server.getHandlerFor(debugHeader, tryApp, fallbackErrorHandler)

@@ -41,6 +41,38 @@ import play.test.Helpers;
 public class RequestBuilderTest {
 
   @Test
+  public void testUri_absolute() {
+    Request request = new RequestBuilder().uri("https://www.benmccann.com/blog").build();
+    assertEquals("https://www.benmccann.com/blog", request.uri());
+  }
+
+  @Test
+  public void testUri_relative() {
+    Request request = new RequestBuilder().uri("/blog").build();
+    assertEquals("/blog", request.uri());
+  }
+
+  @Test
+  public void testUri_asterisk() {
+    Request request = new RequestBuilder().method("OPTIONS").uri("*").build();
+    assertEquals("*", request.uri());
+  }
+
+  @Test
+  public void testSecure() {
+    RequestBuilder builder = new RequestBuilder();
+
+    // Changing the target to https:// does not change the builder's default HTTP effective scheme.
+    assertFalse(builder.uri("https://www.benmccann.com/blog").build().secure());
+    // Make the build set secure
+    assertTrue(builder.secure(true).build().secure());
+    // Changing the target to http:// does not replace the explicitly selected HTTPS effective
+    // scheme.
+    assertTrue(builder.uri("http://www.benmccann.com/blog").build().secure());
+    assertFalse(builder.secure(false).build().secure());
+  }
+
+  @Test
   public void testSchemeAndAuthorityValueTypes() throws Exception {
     Http.Scheme customScheme = new Http.Scheme("Git+SSH.v1-2");
     assertEquals("git+ssh.v1-2", customScheme.render());
@@ -97,6 +129,30 @@ public class RequestBuilderTest {
       assertThatThrownBy(() -> new Http.AuthorityHost.IPv6(scoped))
           .isInstanceOf(IllegalArgumentException.class);
     }
+  }
+
+  @Test
+  public void testSchemeAuthorityAndUriAreIndependentBuilderState() {
+    Http.Scheme scheme = new Http.Scheme("Git+SSH");
+    Http.RequestAuthority authority = Http.RequestAuthority.parse("PUBLIC.example:08443");
+    RequestBuilder builder =
+        new RequestBuilder()
+            .scheme(scheme)
+            .authority(authority)
+            .uri("https://internal.example:9443/original?x=1");
+
+    assertEquals("https://internal.example:9443/original?x=1", builder.uri());
+    assertEquals(scheme, builder.scheme());
+    assertEquals(Optional.of(authority), builder.authority());
+    assertEquals("public.example:8443", builder.host());
+    assertEquals(Optional.of("public.example:8443"), builder.headers().get(Http.HeaderNames.HOST));
+    assertFalse(builder.secure());
+
+    builder.path("/changed");
+    assertEquals("/changed", builder.path());
+    assertEquals(scheme, builder.scheme());
+    assertEquals(Optional.of(authority), builder.authority());
+    assertEquals("public.example:8443", builder.host());
   }
 
   @Test
@@ -202,27 +258,80 @@ public class RequestBuilderTest {
   }
 
   @Test
-  public void testUri_absolute() {
-    Request request = new RequestBuilder().uri("https://www.benmccann.com/blog").build();
-    assertEquals("https://www.benmccann.com/blog", request.uri());
+  public void testRemoteAndTransportAreIndependentBuilderState() {
+    Http.RemoteInfo remote =
+        new Http.RemoteInfo(
+            new Http.RemoteNode.Obfuscated("_client", Optional.empty()), Optional.empty());
+    Http.TransportConnection transport =
+        new Http.TransportConnection(
+            new Http.PeerEndpoint(InetAddresses.forString("192.0.2.10"), Optional.of(53124)),
+            Optional.of(new Http.TransportTls(List.of())));
+
+    Request request = new RequestBuilder().remote(remote).transport(transport).build();
+
+    assertEquals(remote, request.remote());
+    assertEquals(transport, request.transport());
+    assertTrue(request.transport().tls().isPresent());
+    assertEquals(List.of(), request.transport().tls().orElseThrow().peerCertificates());
+    assertFalse(request.secure());
   }
 
   @Test
-  public void testUri_relative() {
-    Request request = new RequestBuilder().uri("/blog").build();
-    assertEquals("/blog", request.uri());
+  public void testPathPreservesRawTargetAuthority() {
+    RequestBuilder oversizedPort =
+        new RequestBuilder()
+            .uri("https://example.com:123456789012345678901234567890/old?x=1")
+            .path("/changed path");
+    assertEquals(
+        "https://example.com:123456789012345678901234567890/changed%20path?x=1",
+        oversizedPort.uri());
+
+    RawTargetRequestBuilder ipvFuture =
+        new RawTargetRequestBuilder()
+            .rawTarget("https://[vF.FOO:BAR]:8443/old?x=1#fragment")
+            .pathOnRawTarget("/changed");
+    assertEquals("https://[vF.FOO:BAR]:8443/changed?x=1#fragment", ipvFuture.uri());
+    assertEquals("/changed", ipvFuture.path());
   }
 
   @Test
-  public void testUri_asterisk() {
-    Request request = new RequestBuilder().method("OPTIONS").uri("*").build();
-    assertEquals("*", request.uri());
-  }
+  public void testAuthorityIsTheCanonicalHostState() {
+    RequestBuilder builder = new RequestBuilder().host("EXAMPLE.com:00080");
+    Http.Headers withoutHost = new Http.Headers(Map.of("X-Test", Collections.singletonList("one")));
+    Http.Headers canonicalHost =
+        new Http.Headers(
+            Map.of(Http.HeaderNames.HOST, Collections.singletonList("example.com:80")));
+    Http.Headers conflictingHost =
+        new Http.Headers(Map.of(Http.HeaderNames.HOST, Collections.singletonList("other.example")));
+    Http.Headers duplicateHost =
+        new Http.Headers(
+            Map.of(Http.HeaderNames.HOST, List.of("example.com:80", "example.com:80")));
 
-  @Test
-  public void testSecure() {
-    assertFalse(new RequestBuilder().uri("http://www.benmccann.com/blog").build().secure());
-    assertTrue(new RequestBuilder().uri("https://www.benmccann.com/blog").build().secure());
+    assertEquals("example.com:80", builder.host());
+    assertEquals(Optional.of(Http.RequestAuthority.parse("example.com:80")), builder.authority());
+
+    builder.headers(withoutHost);
+    assertEquals(Optional.of("example.com:80"), builder.headers().get(Http.HeaderNames.HOST));
+    builder.headers(canonicalHost);
+
+    assertThatThrownBy(() -> builder.headers(conflictingHost))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("withAuthority");
+    assertThatThrownBy(() -> builder.headers(duplicateHost))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("duplicate Host");
+
+    builder.authority(Optional.empty());
+    assertEquals(Optional.empty(), builder.authority());
+    assertEquals("", builder.host());
+    assertEquals(Optional.empty(), builder.headers().get(Http.HeaderNames.HOST));
+    assertThatThrownBy(() -> builder.headers(canonicalHost))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("withAuthority");
+
+    builder.authority(Http.RequestAuthority.parse("NEW.example"));
+    assertEquals("new.example", builder.host());
+    assertEquals(Optional.of("new.example"), builder.headers().get(Http.HeaderNames.HOST));
   }
 
   @Test
@@ -660,5 +769,17 @@ public class RequestBuilderTest {
     --somerandomboundary--
     */
     assertEquals(request.header(Http.HeaderNames.CONTENT_LENGTH).get(), "590");
+  }
+
+  private static final class RawTargetRequestBuilder extends RequestBuilder {
+    private RawTargetRequestBuilder rawTarget(String uri) {
+      req = req.withTarget(req.target().withUriString(uri).withPath("/old"));
+      return this;
+    }
+
+    private RawTargetRequestBuilder pathOnRawTarget(String path) {
+      path(path);
+      return this;
+    }
   }
 }

@@ -22,7 +22,7 @@ It is possible to disable the HTTPS filter for a specific route in the routes fi
 
 The filter evaluates a request to be secure if `request.secure` is true.
 
-This logic depends on the [[trusted proxies|HTTPServer#configuring-trusted-proxies]] configured for Play's HTTP engine. Internally, `play.core.server.common.ForwardedHeaderHandler` and `play.api.mvc.request.RemoteConnection` determine between them whether an incoming request meets the criteria to be "secure", meaning that the request has gone through HTTPS at some point.
+This logic depends on the [[trusted proxies|HTTPServer#configuring-trusted-proxies]] configured for Play's HTTP engine. The engine derives the effective request scheme from direct transport TLS and forwarding metadata accepted from those proxies; `request.secure` is true when that scheme is HTTPS.
 
 When the filter is enabled, any request that is not secure is redirected.
 

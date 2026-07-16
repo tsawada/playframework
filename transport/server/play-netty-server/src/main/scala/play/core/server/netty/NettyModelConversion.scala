@@ -4,7 +4,6 @@
 
 package play.core.server.netty
 
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.security.cert.X509Certificate
@@ -35,9 +34,12 @@ import play.api.http.HttpEntity
 import play.api.http.HttpErrorHandler
 import play.api.libs.typedmap.TypedMap
 import play.api.mvc._
-import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.PeerEndpoint
+import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAttrKey
 import play.api.mvc.request.RequestTarget
+import play.api.mvc.request.TransportConnection
+import play.api.mvc.request.TransportTls
 import play.api.Logger
 import play.core.server.common.ForwardedHeaderHandler
 import play.core.server.common.PathAndQueryParser
@@ -72,23 +74,18 @@ private[server] class NettyModelConversion(
     }
   }
 
-  /** Capture a request's connection info from its channel and headers. */
-  private def createRemoteConnection(channel: Channel, headers: Headers): RemoteConnection = {
-    val rawConnection = new RemoteConnection {
-      override lazy val remoteAddress: InetAddress                           = channel.remoteAddress().asInstanceOf[InetSocketAddress].getAddress
-      private val sslHandler                                                 = Option(channel.pipeline().get(classOf[SslHandler]))
-      override def secure: Boolean                                           = sslHandler.isDefined
-      override lazy val clientCertificateChain: Option[Seq[X509Certificate]] = {
-        try {
-          sslHandler.map { handler =>
-            handler.engine.getSession.getPeerCertificates.toSeq.collect { case x509: X509Certificate => x509 }
-          }
-        } catch {
-          case e: SSLPeerUnverifiedException => None
-        }
+  /** Capture immutable direct transport metadata from a request's channel. */
+  private def createTransport(channel: Channel): TransportConnection = {
+    val socketAddress = channel.remoteAddress().asInstanceOf[InetSocketAddress]
+    val tls           = Option(channel.pipeline().get(classOf[SslHandler])).map { handler =>
+      val peerCertificates = try {
+        handler.engine.getSession.getPeerCertificates.toSeq.collect { case x509: X509Certificate => x509 }
+      } catch {
+        case _: SSLPeerUnverifiedException => Seq.empty
       }
+      TransportTls(peerCertificates)
     }
-    forwardedHeaderHandler.forwardedConnection(rawConnection, headers)
+    TransportConnection(PeerEndpoint(socketAddress.getAddress, Some(socketAddress.getPort)), tls)
   }
 
   /** Create request target information from a Netty request. */
@@ -121,21 +118,76 @@ private[server] class NettyModelConversion(
    * later.
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val headers = new NettyHeadersWrapper(request.headers)
+    val transport     = createTransport(channel)
+    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders    = new NettyHeadersWrapper(request.headers)
+    val directScheme  = RequestHeader.initialScheme(transport)
+    val initialTarget = RequestHeader
+      .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
+      .fold(error => throw new IllegalArgumentException(error), identity)
+    val forwarding = forwardedHeaderHandler.forwardedRequest(
+      rawRemote,
+      rawHeaders,
+      directScheme,
+      initialTarget.authority
+    )
+    val effectiveScheme = RequestHeader
+      .effectiveScheme(initialTarget.scheme, directScheme, forwarding.scheme)
+      .fold(error => throw new IllegalArgumentException(error), identity)
+    val normalizedTarget = RequestHeader.normalizeRequestTargetPath(target, initialTarget)
+    val attrs            = TypedMap(
+      // Send an attribute so our tests can tell which kind of server we're using.
+      // We only do this for the "non-default" engine, so we used to tag
+      // pekko-http explicitly, so that benchmarking isn't affected by this.
+      RequestAttrKey.Server -> "netty",
+      // This is the earliest stage of a Play request at which we can set an id.
+      RequestAttrKey.Id -> RequestIdProvider.freshId(),
+    )
     new RequestHeaderImpl(
-      createRemoteConnection(channel, headers),
+      forwarding.remote,
+      request.method.name(),
+      normalizedTarget,
+      request.protocolVersion.text(),
+      rawHeaders,
+      attrs,
+      transport,
+      effectiveScheme,
+      forwarding.authority
+    )
+  }
+
+  /**
+   * Build a nonthrowing header for reporting a request-conversion error.
+   *
+   * Normal request conversion validates authority and applies trusted forwarding metadata. Reusing
+   * it after conversion failed could repeat the same exception while constructing the RequestHeader
+   * required by HttpErrorHandler. This recovery path therefore uses direct transport metadata,
+   * derives authority best-effort, and deliberately skips forwarded-header processing.
+   */
+  def createErrorRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
+    val transport  = createTransport(channel)
+    val rawRemote  = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders = new NettyHeadersWrapper(request.headers)
+    val scheme     = RequestHeader.initialScheme(transport)
+    val authority  = RequestHeader
+      .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
+      .toOption
+      .flatMap(_.authority)
+    val attrs = TypedMap(
+      RequestAttrKey.Server -> "netty",
+      RequestAttrKey.Id     -> RequestIdProvider.freshId(),
+    )
+
+    new RequestHeaderImpl(
+      rawRemote,
       request.method.name(),
       target,
       request.protocolVersion.text(),
-      headers,
-      TypedMap(
-        // Send an attribute so our tests can tell which kind of server we're using.
-        // We only do this for the "non-default" engine, so we used to tag
-        // pekko-http explicitly, so that benchmarking isn't affected by this.
-        RequestAttrKey.Server -> "netty",
-        // This is the earliest stage of a Play request at which we can set an id.
-        RequestAttrKey.Id -> RequestIdProvider.freshId(),
-      )
+      rawHeaders,
+      attrs,
+      transport,
+      scheme,
+      authority
     )
   }
 
