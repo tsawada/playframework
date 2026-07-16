@@ -384,10 +384,25 @@ private[server] object ForwardedHeaderHandler {
       } yield ParsedForwardedEntry(RemoteInfo(remoteNode, byNode))
     }
 
+    /**
+     * Validate every recognized RFC 7239 parameter before an element may affect
+     * the selected remote, scheme, or authority. Unknown extension parameters
+     * remain intentionally independent of this atomic validation.
+     */
     def validateEntry(entry: ForwardedEntry): Either[String, Option[ParsedForwardedEntry]] = {
-      entry.addressString match {
+      val parsedEntry = entry.addressString match {
         case Some(_) => parseEntry(entry).map(Some(_))
         case None    => parseByNode(entry).map(_ => None)
+      }
+
+      version match {
+        case Rfc7239 =>
+          for {
+            value <- parsedEntry
+            _     <- validateOptional(entry.protoString, "proto")(Scheme.parse)
+            _     <- validateOptional(entry.hostString, "host")(RequestAuthority.parse)
+          } yield value
+        case Xforwarded => parsedEntry
       }
     }
 
@@ -396,6 +411,16 @@ private[server] object ForwardedHeaderHandler {
         case Some(byString) =>
           parseRemoteNode(byString).left.map(error => s"Invalid by parameter: $error").map(Some(_))
         case None => Right(None)
+      }
+    }
+
+    private def validateOptional[A](
+        value: Option[String],
+        parameter: String
+    )(parse: String => Either[String, A]): Either[String, Unit] = {
+      value match {
+        case Some(rawValue) => parse(rawValue).left.map(error => s"Invalid $parameter parameter: $error").map(_ => ())
+        case None           => Right(())
       }
     }
 
