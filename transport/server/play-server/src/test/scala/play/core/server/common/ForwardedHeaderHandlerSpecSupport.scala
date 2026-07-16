@@ -8,6 +8,7 @@ import java.net.InetAddress
 
 import com.google.common.net.InetAddresses
 import org.specs2.mutable.Specification
+import play.api.mvc.request.NodePort
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.Scheme
@@ -16,6 +17,9 @@ import play.api.Configuration
 import play.core.server.common.ForwardedHeaderHandler._
 
 private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
+  def noConfigHandler =
+    new ForwardedHeaderHandler(ForwardedHeaderHandlerConfig(None))
+
   def handler(config: Map[String, Any]) =
     new ForwardedHeaderHandler(
       ForwardedHeaderHandlerConfig(Some(Configuration.from(config).withFallback(Configuration.reference)))
@@ -36,7 +40,35 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
       RequestAuthority.parse(host).toOption
     )
 
+  def forwardedResultToLocalhostWithPort(
+      config: Map[String, Any],
+      remotePort: Option[Int],
+      headersText: String
+  ): ForwardedResult =
+    forwardedResult(
+      handler(config).forwardedRequest(
+        RemoteInfo.ip("127.0.0.1", remotePort.map(NodePort.Numeric.apply)),
+        headers(headersText),
+        Scheme.Http,
+        authority = None
+      )
+    )
+
   def forwardedResult(parsed: ParsedForwarding): ForwardedResult = ForwardedResult(parsed.remote, parsed.scheme)
+
+  def forwardedResultFrom(
+      forwardedHeaderHandler: ForwardedHeaderHandler,
+      initial: ForwardedResult,
+      requestHeaders: Headers
+  ): ForwardedResult =
+    forwardedResult(
+      forwardedHeaderHandler.forwardedRequest(
+        initial.remote,
+        requestHeaders,
+        initial.scheme,
+        authority = None
+      )
+    )
 
   def expectedResult(address: String, isHttps: Boolean): ForwardedResult =
     expectedResult(InetAddresses.forString(address), isHttps)
@@ -44,8 +76,22 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
   def expectedResult(remote: RemoteInfo, isHttps: Boolean): ForwardedResult =
     ForwardedResult(remote, if (isHttps) Scheme.Https else Scheme.Http)
 
+  def expectedResult(
+      address: String,
+      port: Option[Int],
+      isHttps: Boolean
+  ): ForwardedResult =
+    expectedResult(InetAddresses.forString(address), port, isHttps)
+
   def expectedResult(address: InetAddress, isHttps: Boolean): ForwardedResult =
     expectedResult(RemoteInfo.ip(address, None), isHttps)
+
+  def expectedResult(
+      address: InetAddress,
+      port: Option[Int],
+      isHttps: Boolean
+  ): ForwardedResult =
+    expectedResult(RemoteInfo.ip(address, port.map(NodePort.Numeric.apply)), isHttps)
 
   def version(s: String) = {
     Map("play.http.forwarded.version" -> s)

@@ -390,6 +390,63 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "retain direct transport metadata when selecting a forwarded remote node" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { request =>
+          Results.Ok(
+            Seq(
+              request.transport.peer.address.isLoopbackAddress,
+              request.transport.peer.port.exists(_ > 0),
+              request.transport.tls.isDefined,
+              request.remote.identity,
+              request.remote.port,
+              request.secure
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=203.0.113.43;proto=https"),
+            ""
+          )
+        )
+
+        response.body must beLeft("true|true|false|203.0.113.43|None|true")
+      }
+    }
+
+    "keep a non-IP selected remote separate from the direct transport peer" in {
+      withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
+        Action { request =>
+          Results.Ok(
+            Seq(
+              request.transport.peer.address.isLoopbackAddress,
+              request.transport.tls.isEmpty,
+              request.remote.identity,
+              request.remote.ipAddress.isEmpty,
+              request.scheme.render
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Forwarded" -> "for=_hidden;proto=https"),
+            ""
+          )
+        )
+
+        response.body must beLeft("true|true|_hidden|true|https")
+      }
+    }
+
     "respect max header value setting" in {
       withServerAndConfig("play.server.max-header-size" -> "64")((Action, _) => Action(Results.Ok)) { port =>
         val responses = BasicHttpClient.makeRequests(port)(
