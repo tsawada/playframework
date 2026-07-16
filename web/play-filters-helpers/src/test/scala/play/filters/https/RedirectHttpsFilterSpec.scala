@@ -12,8 +12,10 @@ import play.api._
 import play.api.http.HttpFilters
 import play.api.inject.bind
 import play.api.inject.guice.GuiceApplicationBuilder
+import play.api.libs.ws.WSClient
 import play.api.mvc._
 import play.api.mvc.request.RequestAuthority
+import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.Scheme
 import play.api.mvc.Handler.Stage
 import play.api.mvc.Results._
@@ -70,6 +72,44 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       }
     }
 
+    "redirect an absolute request target using only its path and query" in new WithApplication(
+      buildApp(mode = Mode.Prod)
+    ) {
+      override def running() = {
+        val result = route(
+          app,
+          absoluteRequest("http://playframework.com:9000/please/dont?version=GTI|V8", "/please/dont")
+        ).get
+
+        header(LOCATION, result) must beSome("https://playframework.com/please/dont?version=GTI|V8")
+      }
+    }
+
+    "reject a redirect when the effective authority is absent" in new WithApplication(
+      buildApp(mode = Mode.Prod)
+    ) {
+      override def running() = {
+        val result = route(app, request("/evil.example/path").withAuthority(None)).get
+
+        status(result) must_== BAD_REQUEST
+        header(LOCATION, result) must beNone
+      }
+    }
+
+    "reject a redirect when the effective authority has an empty host" in new WithApplication(
+      buildApp(mode = Mode.Prod)
+    ) {
+      override def running() = {
+        val result = route(
+          app,
+          request("/evil.example/path").withAuthority(Some(RequestAuthority.parseOrThrow("")))
+        ).get
+
+        status(result) must_== BAD_REQUEST
+        header(LOCATION, result) must beNone
+      }
+    }
+
     "not redirect when on http in test" in new WithApplication(buildApp(mode = Mode.Test)) {
       override def running() = {
         val result = route(app, request().withScheme(Scheme.Http)).get
@@ -99,7 +139,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       }
     }
 
-    "not redirect when X-Forwarded-Proto header is 'https' (and not on https) but send HSTS header" in new WithApplication(
+    "handle an HTTPS X-Forwarded-Proto value case-insensitively when enabled" in new WithApplication(
       buildApp(
         """
           |play.filters.https.xForwardedProtoEnabled = true
@@ -108,10 +148,34 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "https")).get
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "HTTPS")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beSome("max-age=31536000; includeSubDomains")
         status(result) must_== OK
+      }
+    }
+
+    "use trusted rfc7239 proto without for for redirects and HSTS" in new WithServer(
+      buildApp(
+        """
+          |play.http.forwarded.version = "rfc7239"
+        """.stripMargin,
+        mode = Mode.Prod,
+        withWs = true
+      ),
+      testServerPort
+    ) {
+      override def running() = {
+        val response = await(
+          inject[WSClient]
+            .url(s"http://localhost:$port/")
+            .addHttpHeaders("Forwarded" -> "proto=https")
+            .withFollowRedirects(false)
+            .get()
+        )
+
+        response.status must_== OK
+        response.header(STRICT_TRANSPORT_SECURITY) must beSome("max-age=31536000; includeSubDomains")
       }
     }
 
@@ -122,6 +186,82 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
         val result = route(app, request("/please/dont?remove=this&foo=bar")).get
 
         header(LOCATION, result) must beSome("https://playframework.com:9443/please/dont?remove=this&foo=bar")
+      }
+    }
+
+    "redirect a bracketed IPv6 host to a custom HTTPS port" in new WithApplication(
+      buildApp("play.filters.https.port = 9443", mode = Mode.Prod)
+    ) {
+      override def running() = {
+        val result = route(app, request("/please", host = "[2001:db8::1]:9000")).get
+
+        header(LOCATION, result) must beSome("https://[2001:db8::1]:9443/please")
+      }
+    }
+
+    "redirect using a trusted forwarded host" in new WithServer(
+      buildApp(
+        """
+          |play.filters.https.redirectEnabled = true
+          |play.http.forwarded.version = "rfc7239"
+          |play.http.forwarded.trustForwardedHost = true
+        """.stripMargin,
+        mode = Mode.Test,
+        withWs = true
+      ),
+      testServerPort
+    ) {
+      override def running() = {
+        val ws       = inject[WSClient]
+        val response = await(
+          ws.url(s"http://localhost:$port/please?foo=bar")
+            .addHttpHeaders("Forwarded" -> "for=192.0.2.43;host=\"public.example:8080\"")
+            .withFollowRedirects(false)
+            .get()
+        )
+
+        response.status must_== PERMANENT_REDIRECT
+        response.header(LOCATION) must beSome("https://public.example/please?foo=bar")
+      }
+    }
+
+    "ignore a trusted forwarded host with an empty host when redirecting" in new WithServer(
+      buildApp(
+        """
+          |play.filters.https.redirectEnabled = true
+          |play.http.forwarded.version = "rfc7239"
+          |play.http.forwarded.trustForwardedHost = true
+        """.stripMargin,
+        mode = Mode.Test,
+        withWs = true
+      ),
+      testServerPort
+    ) {
+      override def running() = {
+        val response = await(
+          inject[WSClient]
+            .url(s"http://localhost:$port/evil.example/path")
+            .addHttpHeaders("Forwarded" -> "for=192.0.2.43;host=\"\"")
+            .withFollowRedirects(false)
+            .get()
+        )
+
+        response.status must_== PERMANENT_REDIRECT
+        response.header(LOCATION) must beSome("https://localhost/evil.example/path")
+      }
+    }
+
+    "prefer a trusted effective host over an absolute request target" in new WithApplication(
+      buildApp(mode = Mode.Prod)
+    ) {
+      override def running() = {
+        val result = route(
+          app,
+          absoluteRequest("http://internal.example/please?foo=bar", "/please")
+            .withAuthority(Some(RequestAuthority.parseOrThrow("public.example:8080")))
+        ).get
+
+        header(LOCATION, result) must beSome("https://public.example/please?foo=bar")
       }
     }
 
@@ -188,7 +328,24 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
         status(result) must_== PERMANENT_REDIRECT
       }
     }
-    "redirect when xForwardedProtoEnabled is set and header is present" in new WithApplication(
+    "ignore X-Forwarded-Proto when xForwardedProtoEnabled is false" in new WithApplication(
+      buildApp(
+        """
+          |play.filters.https.redirectEnabled = true
+          |play.filters.https.xForwardedProtoEnabled = false
+        """.stripMargin,
+        mode = Mode.Test
+      )
+    ) {
+      override def running() = {
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "https")).get
+
+        header(STRICT_TRANSPORT_SECURITY, result) must beNone
+        header(LOCATION, result) must beSome("https://playframework.com/")
+        status(result) must_== PERMANENT_REDIRECT
+      }
+    }
+    "handle an HTTP X-Forwarded-Proto value case-insensitively when enabled" in new WithApplication(
       buildApp(
         """
           |play.filters.https.redirectEnabled = true
@@ -198,7 +355,7 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")).get
+        val result = route(app, request().withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "HTTP")).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== PERMANENT_REDIRECT
@@ -233,7 +390,10 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
       )
     ) {
       override def running() = {
-        val result = route(app, request("/skip").withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")).get
+        val result = route(
+          app,
+          request("/skip").withScheme(Scheme.Http).withHeaders("X-Forwarded-Proto" -> "http")
+        ).get
 
         header(STRICT_TRANSPORT_SECURITY, result) must beNone
         status(result) must_== OK
@@ -350,22 +510,33 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
     }
   }
 
-  private def request(path: String = "/", queryParams: Option[String] = None) = {
+  private def request(
+      path: String = "/",
+      queryParams: Option[String] = None,
+      host: String = "playframework.com"
+  ) = {
     FakeRequest(method = "GET", path = path + queryParams.map("?" + _).getOrElse(""))
-      .withAuthority(Some(RequestAuthority.parseOrThrow("playframework.com")))
+      .withAuthority(Some(RequestAuthority.parseOrThrow(host)))
+  }
+
+  private def absoluteRequest(uri: String, path: String) = {
+    request(uri).withTarget(RequestTarget(uri, path, Map.empty))
   }
 
   def inject[T: ClassTag](implicit app: Application) = app.injector.instanceOf[T]
 
-  private def buildApp(config: String = "", mode: Mode = Mode.Test) =
-    GuiceApplicationBuilder(Environment.simple(mode = mode))
-      .configure(Configuration(ConfigFactory.parseString(config)))
-      .load(
+  private def buildApp(config: String = "", mode: Mode = Mode.Test, withWs: Boolean = false) = {
+    val modules: Seq[play.api.inject.guice.GuiceableModule] =
+      Seq[play.api.inject.guice.GuiceableModule](
         new play.api.inject.BuiltinModule,
         new play.api.mvc.CookiesModule,
         new play.api.i18n.I18nModule,
         new play.filters.https.RedirectHttpsModule
-      )
+      ) ++ (if (withWs) Seq[play.api.inject.guice.GuiceableModule](new play.api.libs.ws.ahc.AhcWSModule) else Seq.empty)
+
+    GuiceApplicationBuilder(Environment.simple(mode = mode))
+      .configure(Configuration(ConfigFactory.parseString(config)))
+      .load(modules*)
       .appRoutes(implicit app => {
         case ("GET", "/") =>
           val action = inject[DefaultActionBuilder]
@@ -397,9 +568,13 @@ class RedirectHttpsFilterSpec extends PlaySpecification {
               )
             }
           }
+        case ("GET", "/evil.example/path") =>
+          val action = inject[DefaultActionBuilder]
+          action(Ok(""))
       })
       .overrides(
         bind[HttpFilters].to[TestFilters]
       )
       .build()
+  }
 }
