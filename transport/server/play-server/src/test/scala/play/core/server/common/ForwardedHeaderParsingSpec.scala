@@ -68,11 +68,14 @@ class ForwardedHeaderParsingSpec extends Specification with ForwardedHeaderHandl
         (
           ForwardedHeaderHandlerConfig(
             version = Xforwarded,
-            trustedProxies = List.empty
+            trustedProxies = List.empty,
+            trustXForwardedProtoWithoutXForwardedFor = true,
+            trustXForwardedSsl = true
           ),
           Seq(
             "X-Forwarded-For"   -> "???",
-            "X-Forwarded-Proto" -> "1https"
+            "X-Forwarded-Proto" -> "1https",
+            "X-Forwarded-Ssl"   -> "invalid"
           )
         )
       )

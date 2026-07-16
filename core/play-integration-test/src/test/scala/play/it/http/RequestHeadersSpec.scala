@@ -484,6 +484,29 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
       }
     }
 
+    "use trusted x-forwarded-ssl throughout the request" in {
+      withServerAndConfig(
+        "play.http.forwarded.version"            -> "x-forwarded",
+        "play.http.forwarded.trustXForwardedSsl" -> true
+      )((Action, _) =>
+        Action { request =>
+          Results.Ok(s"${request.secure}|${Call("GET", "/result").absoluteURL()(using request)}")
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/path",
+            "HTTP/1.1",
+            Map("X-Forwarded-Ssl" -> "on"),
+            ""
+          )
+        )
+
+        response.body must beLeft("true|https://localhost/result")
+      }
+    }
+
     "use trusted rfc7239 proto without a forwarded identity throughout the request" in {
       withServerAndConfig("play.http.forwarded.version" -> "rfc7239")((Action, _) =>
         Action { request =>

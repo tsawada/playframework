@@ -39,7 +39,7 @@ import ForwardedHeaderHandler._
  * Trusted protocol metadata advances the effective request scheme independently
  * of the transport TLS state. Missing or ambiguous protocol metadata retains the
  * last verified scheme. Explicit opt-ins cover legacy deployments that provide a
- * single X-Forwarded-Proto value or omit X-Forwarded-For.
+ * single X-Forwarded-Proto value, omit X-Forwarded-For, or use X-Forwarded-Ssl.
  */
 private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandlerConfig) {
 
@@ -154,6 +154,7 @@ private[server] class ForwardedHeaderHandler(configuration: ForwardedHeaderHandl
 
 private[server] object ForwardedHeaderHandler {
   private val logger              = Logger(getClass)
+  private val XForwardedSsl       = "X-Forwarded-Ssl"
   private val XForwardedSeparator = Pattern.compile(",\\s*")
 
   /**
@@ -189,7 +190,8 @@ private[server] object ForwardedHeaderHandler {
       trustedProxies: List[Subnet],
       trustedProxyIdentifiers: Set[String] = Set.empty,
       trustSingleXForwardedProto: Boolean = false,
-      trustXForwardedProtoWithoutXForwardedFor: Boolean = false
+      trustXForwardedProtoWithoutXForwardedFor: Boolean = false,
+      trustXForwardedSsl: Boolean = false
   ) {
     val nodeIdentifierParser = new NodeIdentifierParser(version)
 
@@ -245,8 +247,12 @@ private[server] object ForwardedHeaderHandler {
             .map(stripQuotes)
             .toVector
 
-        val forHeaders   = h(headers, HeaderNames.X_FORWARDED_FOR)
-        val protoHeaders = h(headers, HeaderNames.X_FORWARDED_PROTO)
+        val forHeaders        = h(headers, HeaderNames.X_FORWARDED_FOR)
+        val protoHeaderValues = headers.getAll(HeaderNames.X_FORWARDED_PROTO)
+        val protoHeaders      = h(headers, HeaderNames.X_FORWARDED_PROTO)
+        val sslProto          = Option
+          .when(protoHeaderValues.isEmpty && trustXForwardedSsl)(xForwardedSslProto(headers))
+          .flatten
 
         def protoForIndex(index: Int): Option[String] = {
           if (forHeaders.length == protoHeaders.length) {
@@ -258,6 +264,8 @@ private[server] object ForwardedHeaderHandler {
             index == 0
           ) {
             protoHeaders.headOption
+          } else if (protoHeaders.isEmpty && index == 0) {
+            sslProto
           } else {
             None
           }
@@ -266,6 +274,8 @@ private[server] object ForwardedHeaderHandler {
         val protoWithoutFor =
           if (protoHeaders.length == 1 && trustXForwardedProtoWithoutXForwardedFor) {
             protoHeaders.headOption
+          } else if (protoHeaderValues.isEmpty) {
+            sslProto
           } else {
             None
           }
@@ -339,6 +349,24 @@ private[server] object ForwardedHeaderHandler {
       version == Rfc7239 && trustedProxyIdentifiers.contains(identifier)
     }
 
+    private def singleXForwardedValue(headers: Headers, name: String): Option[String] = {
+      headers
+        .getAll(name)
+        .flatMap(_.split(",", -1))
+        .map(_.trim) match {
+        case Seq(value) if value.nonEmpty => Some(value)
+        case _                            => None
+      }
+    }
+
+    private def xForwardedSslProto(headers: Headers): Option[String] = {
+      singleXForwardedValue(headers, XForwardedSsl).flatMap {
+        case value if value.equalsIgnoreCase("on")  => Some("https")
+        case value if value.equalsIgnoreCase("off") => Some("http")
+        case _                                      => None
+      }
+    }
+
     /** Parse trusted protocol metadata from an element. */
     def forwardedScheme(entry: ForwardedEntry): Option[Scheme] = {
       entry.protoString.flatMap(Scheme.parse(_).toOption)
@@ -348,7 +376,8 @@ private[server] object ForwardedHeaderHandler {
     def forwardedSchemeWithoutFor(entry: ForwardedEntry): Option[Scheme] = {
       if (
         entry.addressString.isEmpty &&
-        (version == Rfc7239 || (version == Xforwarded && trustXForwardedProtoWithoutXForwardedFor))
+        (version == Rfc7239 ||
+          (version == Xforwarded && (trustXForwardedProtoWithoutXForwardedFor || trustXForwardedSsl)))
       ) {
         forwardedScheme(entry)
       } else {
@@ -390,7 +419,8 @@ private[server] object ForwardedHeaderHandler {
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,
         trustedProxyIdentifiers.toSet,
         config.getOptional[Boolean]("trustSingleXForwardedProto").getOrElse(false),
-        config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false)
+        config.getOptional[Boolean]("trustXForwardedProtoWithoutXForwardedFor").getOrElse(false),
+        config.getOptional[Boolean]("trustXForwardedSsl").getOrElse(false)
       )
     }
   }

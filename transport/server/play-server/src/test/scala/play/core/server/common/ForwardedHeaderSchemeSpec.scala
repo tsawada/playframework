@@ -253,6 +253,154 @@ class ForwardedHeaderSchemeSpec extends Specification with ForwardedHeaderHandle
       ) mustEqual expectedResult(localhost, false)
     }
 
+    "ignore x-forwarded-ssl by default" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1"),
+        """
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "use x-forwarded-ssl without x-forwarded-for when enabled and proxy is trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "interpret x-forwarded-ssl case-insensitively" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Ssl: ON
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, true)
+    }
+
+    "interpret x-forwarded-ssl off as an insecure original request" in {
+      val result = forwardedResultFrom(
+        handler(version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true)),
+        expectedResult("127.0.0.1", true),
+        headers("X-Forwarded-Ssl: off")
+      )
+
+      result mustEqual expectedResult(localhost, false)
+    }
+
+    "ignore an unrecognized x-forwarded-ssl value" in {
+      val result = forwardedResultFrom(
+        handler(version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true)),
+        expectedResult("127.0.0.1", true),
+        headers("X-Forwarded-Ssl: yes")
+      )
+
+      result mustEqual expectedResult(localhost, true)
+    }
+
+    "ignore comma-separated x-forwarded-ssl values" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Ssl: on, off
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "ignore repeated x-forwarded-ssl values" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Ssl: on
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "ignore x-forwarded-ssl from an untrusted directly connected proxy" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.0.2.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "associate x-forwarded-ssl with the client x-forwarded-for entry" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "stop before x-forwarded-ssl at an untrusted intermediary" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 198.51.100.17, 192.168.1.43
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult("198.51.100.17", false)
+    }
+
+    "prefer an insecure x-forwarded-proto over an enabled x-forwarded-ssl value" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: http
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "prefer a secure x-forwarded-proto over an enabled x-forwarded-ssl value" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-For: 203.0.113.43
+          |X-Forwarded-Proto: https
+          |X-Forwarded-Ssl: off
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", true)
+    }
+
+    "not fall back to x-forwarded-ssl when x-forwarded-proto is ambiguous" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("0.0.0.0/0") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-For: 203.0.113.43, 192.168.1.43, 192.168.1.44
+          |X-Forwarded-Proto: https, https
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
+    "not fall back to x-forwarded-ssl when x-forwarded-proto without x-forwarded-for is not trusted" in {
+      forwardedResultToLocalhost(
+        version("x-forwarded") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |X-Forwarded-Proto: https
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult(localhost, false)
+    }
+
+    "not apply trustXForwardedSsl to rfc7239 forwarded headers" in {
+      forwardedResultToLocalhost(
+        version("rfc7239") ++ trustedProxies("127.0.0.1") ++ trustXForwardedSsl(true),
+        """
+          |Forwarded: for=203.0.113.43
+          |X-Forwarded-Ssl: on
+        """.stripMargin
+      ) mustEqual expectedResult("203.0.113.43", false)
+    }
+
     "retain the previously verified scheme when the x-forwarded proto list is longer than the for list" in {
       forwardedResultToLocalhost(
         version("x-forwarded") ++ trustedProxies("192.168.1.1/24", "127.0.0.1"),

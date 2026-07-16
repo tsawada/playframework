@@ -117,6 +117,10 @@ private[common] trait ForwardedHeaderHandlerSpecSupport { self: Specification =>
     Map("play.http.forwarded.trustXForwardedProtoWithoutXForwardedFor" -> b)
   }
 
+  def trustXForwardedSsl(b: Boolean) = {
+    Map("play.http.forwarded.trustXForwardedSsl" -> b)
+  }
+
   def headers(s: String): Headers = {
     def split(s: String, regex: String): Option[(String, String)] = s.split(regex, 2).toList match {
       case k :: v :: Nil => Some(k -> v)
