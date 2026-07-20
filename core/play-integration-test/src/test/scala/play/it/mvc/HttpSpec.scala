@@ -11,17 +11,6 @@ import play.api.test.FakeRequest
 class HttpSpec extends org.specs2.mutable.Specification {
   title("HTTP")
 
-  private def withSecureConnection(req: RequestHeader): RequestHeader =
-    req.withConnection(
-      RemoteConnection(
-        req.connection.remoteIpAddress.get,
-        req.connection.remoteNode,
-        req.connection.remotePort,
-        secure = true,
-        req.connection.clientCertificateChain
-      )
-    )
-
   "Absolute URL" should {
     val req = FakeRequest().withHeaders(HeaderNames.HOST -> "playframework.com")
 
@@ -38,7 +27,8 @@ class HttpSpec extends org.specs2.mutable.Specification {
     "have HTTPS scheme" in {
       (Call("GET", "/playframework")
         .absoluteURL()(
-          using withSecureConnection(req)
+          using req
+            .withConnection(RemoteConnection(req.connection.remoteAddress, true, req.connection.clientCertificateChain))
         )
         .aka("absolute URL 1") must_== "https://playframework.com/playframework").and(
         Call("GET", "/playframework")
@@ -64,7 +54,8 @@ class HttpSpec extends org.specs2.mutable.Specification {
     "have wss scheme" in {
       (Call("GET", "/playframework")
         .webSocketURL()(
-          using withSecureConnection(req)
+          using req
+            .withConnection(RemoteConnection(req.connection.remoteAddress, true, req.connection.clientCertificateChain))
         )
         .aka("absolute URL 1") must_== "wss://playframework.com/playframework").and(
         Call("GET", "/playframework")
