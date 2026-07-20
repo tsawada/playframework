@@ -26,6 +26,12 @@ Play now uses Pekko 2 and Pekko HTTP 2. If your build overrides Play's Pekko dep
 
 The deprecated low-level `org.apache.pekko.http.play.WebSocketHandler.handleWebSocket` overloads that accepted Pekko HTTP's old `UpgradeToWebSocket` API have been removed. Code using this internal Pekko HTTP bridge should use the maintained `WebSocketUpgrade` overload instead.
 
+### Request metadata and forwarded-header changes
+
+Play replaces the legacy combined connection APIs with typed `remote`, `transport`, `scheme`, and `authority` metadata. Applications may need to update request accessors and test builders, IP filter entries, custom request implementations, and proxy configuration.
+
+Forwarded-header parsing, Host and absolute-target validation, scheme retention, CORS origin checks, and Redirect HTTPS behavior have also changed. See [[Request metadata and forwarded-header migration|RequestMetadataMigration31]] for the complete migration instructions and [[Typed request and forwarded metadata|RequestMetadataHighlights31]] for a conceptual overview.
+
 ### HEAD responses no longer include generated Content-Length headers
 
 Play no longer renders generated `Content-Length` headers for `HEAD` responses. `HEAD` responses still do not include a response body, but applications and tests should not rely on `Content-Length` being present on a `HEAD` response, even when the equivalent `GET` response has a known length.

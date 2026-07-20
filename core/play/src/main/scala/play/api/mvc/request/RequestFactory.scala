@@ -20,7 +20,10 @@ trait RequestFactory {
    * Create a `RequestHeader`.
    */
   def createRequestHeader(
-      connection: RemoteConnection,
+      transport: TransportConnection,
+      remote: RemoteInfo,
+      scheme: Scheme,
+      authority: Option[RequestAuthority],
       method: String,
       target: RequestTarget,
       version: String,
@@ -34,7 +37,17 @@ trait RequestFactory {
    * values to produce a modified `RequestHeader`.
    */
   def copyRequestHeader(rh: RequestHeader): RequestHeader = {
-    createRequestHeader(rh.connection, rh.method, rh.target, rh.version, rh.headers, rh.attrs)
+    createRequestHeader(
+      rh.transport,
+      rh.remote,
+      rh.scheme,
+      rh.authority,
+      rh.method,
+      rh.target,
+      rh.version,
+      rh.headers,
+      rh.attrs
+    )
   }
 
   /**
@@ -42,7 +55,10 @@ trait RequestFactory {
    * `createRequestHeader(...).withBody(body)`.
    */
   def createRequest[A](
-      connection: RemoteConnection,
+      transport: TransportConnection,
+      remote: RemoteInfo,
+      scheme: Scheme,
+      authority: Option[RequestAuthority],
       method: String,
       target: RequestTarget,
       version: String,
@@ -50,7 +66,9 @@ trait RequestFactory {
       attrs: TypedMap,
       body: A
   ): Request[A] =
-    createRequestHeader(connection, method, target, version, headers, attrs).withBody(body)
+    createRequestHeader(transport, remote, scheme, authority, method, target, version, headers, attrs).withBody(
+      body
+    )
 
   /**
    * Creates a `Request` based on the values of an
@@ -58,7 +76,18 @@ trait RequestFactory {
    * values to produce a modified `Request`.
    */
   def copyRequest[A](r: Request[A]): Request[A] = {
-    createRequest[A](r.connection, r.method, r.target, r.version, r.headers, r.attrs, r.body)
+    createRequest[A](
+      r.transport,
+      r.remote,
+      r.scheme,
+      r.authority,
+      r.method,
+      r.target,
+      r.version,
+      r.headers,
+      r.attrs,
+      r.body
+    )
   }
 }
 
@@ -70,14 +99,17 @@ object RequestFactory {
    */
   val plain = new RequestFactory {
     override def createRequestHeader(
-        connection: RemoteConnection,
+        transport: TransportConnection,
+        remote: RemoteInfo,
+        scheme: Scheme,
+        authority: Option[RequestAuthority],
         method: String,
         target: RequestTarget,
         version: String,
         headers: Headers,
         attrs: TypedMap
     ): RequestHeader =
-      new RequestHeaderImpl(connection, method, target, version, headers, attrs)
+      new RequestHeaderImpl(remote, method, target, version, headers, attrs, transport, scheme, authority)
   }
 }
 
@@ -101,7 +133,10 @@ class DefaultRequestFactory @Inject() (
   )
 
   override def createRequestHeader(
-      connection: RemoteConnection,
+      transport: TransportConnection,
+      remote: RemoteInfo,
+      scheme: Scheme,
+      authority: Option[RequestAuthority],
       method: String,
       target: RequestTarget,
       version: String,
@@ -130,6 +165,6 @@ class DefaultRequestFactory @Inject() (
       RequestAttrKey.Session -> sessionCell,
       RequestAttrKey.Flash   -> flashCell
     )
-    new RequestHeaderImpl(connection, method, target, version, headers, updatedAttrMap)
+    new RequestHeaderImpl(remote, method, target, version, headers, updatedAttrMap, transport, scheme, authority)
   }
 }

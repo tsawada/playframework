@@ -6,6 +6,12 @@ This section highlights the new features of Play 3.1. If you want to learn about
 
 ## Other Additions
 
+### Typed request and forwarded metadata
+
+Play now keeps the selected remote identity, direct transport connection, and effective request scheme and authority as separate typed values. The model supports RFC 7239 unknown and obfuscated identities, retained forwarding paths and `by` nodes, trusted forwarded hosts and schemes, endpoint ports, and identity-aware IP filtering.
+
+Forwarded-header parsing and trust handling have also been strengthened, including atomic validation of recognized RFC 7239 parameters and explicit opt-in handling for common `X-Forwarded-*` layouts. See [[Typed request and forwarded metadata|RequestMetadataHighlights31]] for the complete overview and [[Request metadata and forwarded-header migration|RequestMetadataMigration31]] for upgrade instructions.
+
 ### WebSocket Compression
 
 The Play Pekko HTTP and Netty server backends now support WebSocket compression using the RFC 7692 `permessage-deflate` extension.

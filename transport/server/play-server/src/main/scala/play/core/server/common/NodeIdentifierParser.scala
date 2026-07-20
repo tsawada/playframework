@@ -7,11 +7,12 @@ package play.core.server.common
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.util.Locale
 
 import scala.util.parsing.combinator.RegexParsers
-import scala.util.Try
 
-import com.google.common.net.InetAddresses
+import play.api.mvc.request.IpAddressSyntax
+import play.api.mvc.request.NodePort
 import play.core.server.common.ForwardedHeaderHandler.ForwardedHeaderVersion
 import play.core.server.common.ForwardedHeaderHandler.Rfc7239
 import play.core.server.common.ForwardedHeaderHandler.Xforwarded
@@ -24,6 +25,10 @@ import play.core.server.common.NodeIdentifierParser._
  * The version is used to switch between IP address parsing behavior.
  */
 private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) extends RegexParsers {
+  // RFC 7239 requires the complete unescaped node value to match the node
+  // grammar. X-Forwarded-For historically permits surrounding whitespace.
+  override val skipWhitespace: Boolean = version == Xforwarded
+
   def parseNode(s: String): Either[String, (IpAddress, Option[Port])] = {
     parse(node, s) match {
       case Success(matched, _) => Right(matched)
@@ -39,11 +44,11 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
   private lazy val nodename = version match {
     case Rfc7239 =>
       // RFC 7239 recognizes IPv4 addresses, escaped IPv6 addresses, unknown and obfuscated addresses
-      (ipv4Address | "[" ~> ipv6Address <~ "]" | "unknown" | obfnode) ^^ {
-        case x: Inet4Address => Ip(x)
-        case x: Inet6Address => Ip(x)
-        case "unknown"       => UnknownIp
-        case x               => ObfuscatedIp(x.toString)
+      (ipv4Address | "[" ~> ipv6Address <~ "]" | "(?i)unknown".r | obfnode) ^^ {
+        case x: Inet4Address                                          => Ip(x)
+        case x: Inet6Address                                          => Ip(x)
+        case x if x.toString.toLowerCase(Locale.ENGLISH) == "unknown" => UnknownIp
+        case x                                                        => ObfuscatedIp(x.toString)
       }
     case Xforwarded =>
       // X-Forwarded-For recognizes IPv4 and escaped or unescaped IPv6 addresses
@@ -53,26 +58,28 @@ private[common] class NodeIdentifierParser(version: ForwardedHeaderVersion) exte
       }
   }
 
-  private lazy val ipv4Address = regex("[\\d\\.]{7,15}".r) ^? inetAddress
+  private lazy val ipv4Address = regex("[0-9.]{7,15}".r) ^? parsedAddress(IpAddressSyntax.parseIpv4)
 
-  private lazy val ipv6Address = regex("[\\da-fA-F:\\.]+".r) ^? inetAddress
+  private lazy val ipv6Address = regex("[0-9a-fA-F:\\.]+".r) ^? parsedAddress { value =>
+    IpAddressSyntax.parseIpv6(value).map(IpAddressSyntax.collapseMappedIpv6)
+  }
 
-  private lazy val obfnode = regex("_[\\p{Alnum}\\._-]+".r)
+  private lazy val obfnode = regex(NodePort.obfuscatedIdentifierPattern)
 
   private lazy val nodeport = (port | obfport) ^^ {
     case x: Int => PortNumber(x)
     case x      => ObfuscatedPort(x.toString)
   }
 
-  private lazy val port = regex("\\d{1,5}".r) ^? {
+  private lazy val port = regex("[0-9]{1,5}".r) ^? {
     case x if x.toInt <= 65535 => x.toInt
   }
 
-  private def obfport = regex("_[\\p{Alnum}\\._-]+".r)
+  private def obfport = regex(NodePort.obfuscatedIdentifierPattern)
 
-  private def inetAddress = new PartialFunction[String, InetAddress] {
-    def isDefinedAt(s: String) = Try { InetAddresses.forString(s) }.isSuccess
-    def apply(s: String)       = Try { InetAddresses.forString(s) }.get
+  private def parsedAddress[A <: InetAddress](parse: String => Option[A]) = new PartialFunction[String, A] {
+    def isDefinedAt(s: String) = parse(s).isDefined
+    def apply(s: String)       = parse(s).get
   }
 }
 

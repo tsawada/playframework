@@ -7,9 +7,14 @@ package play.mvc;
 import static play.core.formatters.Multipart.escapeParamWithHTML5Strategy;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.google.common.net.InetAddresses;
 import java.io.File;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
+import java.math.BigInteger;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
@@ -197,6 +202,514 @@ public class Http {
     }
   }
 
+  /** The network endpoint directly connected to Play. */
+  public record PeerEndpoint(InetAddress address, Optional<Integer> port) {
+    public PeerEndpoint {
+      Objects.requireNonNull(address, "address");
+      Objects.requireNonNull(port, "port");
+      if (port.isPresent() && (port.get() < 0 || port.get() > 65535)) {
+        throw new IllegalArgumentException(
+            "A direct transport peer port must be between 0 and 65535: " + port.get());
+      }
+    }
+
+    @SuppressWarnings("unchecked")
+    public play.api.mvc.request.PeerEndpoint asScala() {
+      scala.Option<Object> scalaPort =
+          (scala.Option<Object>) (scala.Option<?>) OptionConverters.toScala(port);
+      return play.api.mvc.request.PeerEndpoint$.MODULE$.create(address, scalaPort);
+    }
+  }
+
+  /** TLS metadata observed on the connection directly terminating at Play. */
+  public record TransportTls(List<X509Certificate> peerCertificates) {
+    public TransportTls {
+      peerCertificates = List.copyOf(peerCertificates);
+    }
+
+    public play.api.mvc.request.TransportTls asScala() {
+      return play.api.mvc.request.TransportTls$.MODULE$.create(Scala.asScala(peerCertificates));
+    }
+  }
+
+  /** Immutable metadata about the transport connection directly terminating at Play. */
+  public record TransportConnection(PeerEndpoint peer, Optional<TransportTls> tls) {
+    public TransportConnection {
+      Objects.requireNonNull(peer, "peer");
+      Objects.requireNonNull(tls, "tls");
+    }
+
+    public play.api.mvc.request.TransportConnection asScala() {
+      return play.api.mvc.request.TransportConnection$.MODULE$.create(
+          peer.asScala(), OptionConverters.toScala(tls.map(TransportTls::asScala)));
+    }
+  }
+
+  /** A normalized URI scheme. */
+  public record Scheme(String value) {
+    public static final Scheme HTTP = new Scheme("http");
+    public static final Scheme HTTPS = new Scheme("https");
+
+    public Scheme {
+      value = play.api.mvc.request.Scheme$.MODULE$.create(value).value();
+    }
+
+    public boolean isSecure() {
+      return value.equals("https");
+    }
+
+    public String render() {
+      return value;
+    }
+
+    public play.api.mvc.request.Scheme asScala() {
+      return play.api.mvc.request.Scheme$.MODULE$.create(value);
+    }
+
+    @Override
+    public String toString() {
+      return render();
+    }
+  }
+
+  /** A typed, normalized URI host. */
+  public sealed interface AuthorityHost
+      permits AuthorityHost.RegName,
+          AuthorityHost.IPv4,
+          AuthorityHost.IPv6,
+          AuthorityHost.IPvFuture {
+
+    String render();
+
+    play.api.mvc.request.AuthorityHost asScala();
+
+    record RegName(String value) implements AuthorityHost {
+      public RegName {
+        value = play.api.mvc.request.AuthorityHost$.MODULE$.regName(value).value();
+      }
+
+      @Override
+      public String render() {
+        return value;
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.regName(value);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPv4(Inet4Address address) implements AuthorityHost {
+      public IPv4 {
+        Objects.requireNonNull(address, "address");
+      }
+
+      @Override
+      public String render() {
+        return asScala().render();
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipv4(address);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPv6(Inet6Address address) implements AuthorityHost {
+      public IPv6 {
+        Objects.requireNonNull(address, "address");
+        play.api.mvc.request.AuthorityHost$.MODULE$.ipv6(address);
+      }
+
+      @Override
+      public String render() {
+        return asScala().render();
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipv6(address);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+
+    record IPvFuture(String value) implements AuthorityHost {
+      public IPvFuture {
+        value = play.api.mvc.request.AuthorityHost$.MODULE$.ipvFuture(value).value();
+      }
+
+      @Override
+      public String render() {
+        return "[" + value + "]";
+      }
+
+      @Override
+      public play.api.mvc.request.AuthorityHost asScala() {
+        return play.api.mvc.request.AuthorityHost$.MODULE$.ipvFuture(value);
+      }
+
+      @Override
+      public String toString() {
+        return render();
+      }
+    }
+  }
+
+  /** An arbitrary non-negative decimal URI port. */
+  public record AuthorityPort(BigInteger value) {
+    private static final BigInteger MAX_TCP_PORT = BigInteger.valueOf(65535);
+
+    public AuthorityPort {
+      Objects.requireNonNull(value, "value");
+      if (value.signum() < 0) {
+        throw new IllegalArgumentException("An authority port must not be negative");
+      }
+    }
+
+    public static AuthorityPort parse(String value) {
+      return play.api.mvc.request.AuthorityPort$.MODULE$.parseOrThrow(value).asJava();
+    }
+
+    public Optional<Integer> tcpPort() {
+      return value.compareTo(MAX_TCP_PORT) <= 0 ? Optional.of(value.intValue()) : Optional.empty();
+    }
+
+    public String render() {
+      return value.toString();
+    }
+
+    public play.api.mvc.request.AuthorityPort asScala() {
+      return play.api.mvc.request.AuthorityPort$.MODULE$.create(value);
+    }
+
+    @Override
+    public String toString() {
+      return render();
+    }
+  }
+
+  /** A normalized request destination authority. */
+  public record RequestAuthority(AuthorityHost host, Optional<AuthorityPort> port) {
+    public RequestAuthority {
+      Objects.requireNonNull(host, "host");
+      Objects.requireNonNull(port, "port");
+    }
+
+    public static RequestAuthority parse(String value) {
+      return play.api.mvc.request.RequestAuthority$.MODULE$.parseOrThrow(value).asJava();
+    }
+
+    public String render() {
+      return host.render() + port.map(value -> ":" + value.render()).orElse("");
+    }
+
+    public RequestAuthority withPort(Optional<AuthorityPort> port) {
+      return new RequestAuthority(host, port);
+    }
+
+    public play.api.mvc.request.RequestAuthority asScala() {
+      return play.api.mvc.request.RequestAuthority$.MODULE$.create(
+          host.asScala(), OptionConverters.toScala(port.map(AuthorityPort::asScala)));
+    }
+
+    @Override
+    public String toString() {
+      return render();
+    }
+  }
+
+  public sealed interface NodePort permits NodePort.Numeric, NodePort.Obfuscated {
+
+    /**
+     * @return the Scala version of this node port
+     */
+    play.api.mvc.request.NodePort asScala();
+
+    public record Numeric(int value) implements NodePort {
+      public Numeric {
+        if (value < 0 || value > 65535) {
+          throw new IllegalArgumentException(
+              "A numeric node port must be between 0 and 65535: " + value);
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.NodePort asScala() {
+        return play.api.mvc.request.NodePort$.MODULE$.numeric(value);
+      }
+    }
+
+    public record Obfuscated(String value) implements NodePort {
+      public Obfuscated {
+        Objects.requireNonNull(value, "An obfuscated node port must not be null");
+        if (!play.api.mvc.request.NodePort$.MODULE$.isObfuscatedIdentifier(value)) {
+          throw new IllegalArgumentException("Invalid obfuscated node port: '" + value + "'");
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.NodePort asScala() {
+        return play.api.mvc.request.NodePort$.MODULE$.obfuscated(value);
+      }
+    }
+  }
+
+  public sealed interface RemoteNode
+      permits RemoteNode.Ip, RemoteNode.Obfuscated, RemoteNode.Unknown {
+
+    /**
+     * @return the optional numeric or obfuscated port attached to this node
+     */
+    Optional<NodePort> port();
+
+    /**
+     * @return the Scala version of this remote node.
+     */
+    play.api.mvc.request.RemoteNode asScala();
+
+    public record Ip(InetAddress address, Optional<NodePort> port) implements RemoteNode {
+
+      public Ip {
+        Objects.requireNonNull(address, "A remote IP address must not be null");
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        scala.Option<play.api.mvc.request.NodePort> scalaPort =
+            OptionConverters.toScala(port.map(NodePort::asScala));
+        return play.api.mvc.request.RemoteNode$.MODULE$.ip(address, scalaPort);
+      }
+    }
+
+    public record Obfuscated(String identifier, Optional<NodePort> port) implements RemoteNode {
+
+      public Obfuscated {
+        Objects.requireNonNull(identifier, "A remote obfuscated identifier must not be null");
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+        if (!play.api.mvc.request.NodePort$.MODULE$.isObfuscatedIdentifier(identifier)) {
+          throw new IllegalArgumentException(
+              "Invalid obfuscated remote identifier: '" + identifier + "'");
+        }
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        return play.api.mvc.request.RemoteNode$.MODULE$.obfuscated(
+            identifier, OptionConverters.toScala(port.map(NodePort::asScala)));
+      }
+    }
+
+    public record Unknown(Optional<NodePort> port) implements RemoteNode {
+
+      public Unknown {
+        Objects.requireNonNull(port, "A remote node port option must not be null");
+      }
+
+      @Override
+      public play.api.mvc.request.RemoteNode asScala() {
+        return play.api.mvc.request.RemoteNode$.MODULE$.unknown(
+            OptionConverters.toScala(port.map(NodePort::asScala)));
+      }
+    }
+  }
+
+  /** A selected or intermediate endpoint from an accepted forwarding path. */
+  public record RemoteEndpoint(RemoteNode node, Optional<RemoteNode> byNode) {
+
+    public RemoteEndpoint {
+      Objects.requireNonNull(node, "A remote endpoint node must not be null");
+      Objects.requireNonNull(byNode, "A remote endpoint by-node option must not be null");
+    }
+
+    /**
+     * @return the Scala version of this remote endpoint
+     */
+    public play.api.mvc.request.RemoteEndpoint asScala() {
+      return play.api.mvc.request.RemoteEndpoint$.MODULE$.create(
+          node.asScala(), OptionConverters.toScala(byNode.map(RemoteNode::asScala)));
+    }
+  }
+
+  /** The header family from which accepted remote forwarding metadata was derived. */
+  public enum ForwardingSource {
+    /** The standardized RFC 7239 {@code Forwarded} header. */
+    RFC_7239,
+
+    /** The de facto {@code X-Forwarded-*} header family. */
+    X_FORWARDED;
+
+    /**
+     * @return the Scala version of this forwarding source
+     */
+    public play.api.mvc.request.ForwardingSource asScala() {
+      return switch (this) {
+        case RFC_7239 -> play.api.mvc.request.ForwardingSource$.MODULE$.rfc7239();
+        case X_FORWARDED -> play.api.mvc.request.ForwardingSource$.MODULE$.xForwarded();
+      };
+    }
+  }
+
+  /** Accepted forwarding metadata for a selected remote endpoint. */
+  public record ForwardingInfo(ForwardingSource source, List<RemoteEndpoint> via) {
+
+    public ForwardingInfo {
+      Objects.requireNonNull(source, "A forwarding source must not be null");
+      via = List.copyOf(via);
+    }
+
+    /**
+     * @return the Scala version of this forwarding metadata
+     */
+    public play.api.mvc.request.ForwardingInfo asScala() {
+      List<play.api.mvc.request.RemoteEndpoint> scalaVia =
+          via.stream().map(RemoteEndpoint::asScala).toList();
+      return play.api.mvc.request.ForwardingInfo$.MODULE$.create(
+          source.asScala(), Scala.toSeq(scalaVia));
+    }
+  }
+
+  /** Immutable metadata about the selected remote node for a request. */
+  public record RemoteInfo(
+      RemoteNode node, Optional<RemoteNode> byNode, Optional<ForwardingInfo> forwarding) {
+
+    /** Create direct selected remote metadata without accepted forwarding information. */
+    public RemoteInfo(RemoteNode node, Optional<RemoteNode> byNode) {
+      this(node, byNode, Optional.empty());
+    }
+
+    public RemoteInfo {
+      Objects.requireNonNull(node, "A selected remote node must not be null");
+      Objects.requireNonNull(byNode, "A by-node option must not be null");
+      Objects.requireNonNull(forwarding, "A forwarding metadata option must not be null");
+    }
+
+    /**
+     * @return the selected endpoint represented by {@link #node()} and {@link #byNode()}
+     */
+    public RemoteEndpoint endpoint() {
+      return new RemoteEndpoint(node, byNode);
+    }
+
+    /**
+     * Return the accepted remote path in client-to-Play order.
+     *
+     * <p>For a direct request this contains only {@link #endpoint()}, which represents the direct
+     * transport peer. For a forwarded request it contains the selected endpoint followed by the
+     * trusted intermediate proxy endpoints Play traversed, but excludes the independently observed
+     * direct transport peer.
+     *
+     * @return the immutable accepted remote path
+     */
+    public List<RemoteEndpoint> path() {
+      ArrayList<RemoteEndpoint> path = new ArrayList<>();
+      path.add(endpoint());
+      forwarding.ifPresent(value -> path.addAll(value.via()));
+      return List.copyOf(path);
+    }
+
+    /**
+     * @return whether the selected endpoint was obtained from accepted forwarding metadata
+     */
+    public boolean isForwarded() {
+      return forwarding.isPresent();
+    }
+
+    /**
+     * The selected remote identity.
+     *
+     * <p>When the identity is an IP address, the node may also include the selected remote port.
+     * RFC 7239 {@code unknown} and obfuscated identifiers are represented explicitly so
+     * applications do not need to parse a string value.
+     *
+     * @return the selected remote identity as an IP literal, obfuscated identifier, or {@code
+     *     unknown}
+     */
+    public String identity() {
+      if (node instanceof RemoteNode.Ip ip) {
+        return ip.address().getHostAddress();
+      } else if (node instanceof RemoteNode.Obfuscated obfuscated) {
+        return obfuscated.identifier();
+      } else {
+        return "unknown";
+      }
+    }
+
+    /**
+     * The RFC 7239 {@code by} node for the selected forwarded element, if present.
+     *
+     * <p>This identifies the proxy interface that received the request represented by {@link
+     * #node()}. It is not the selected remote identity; use {@link #node()} for that.
+     *
+     * @return the receiving proxy node, if present
+     */
+    @Override
+    public Optional<RemoteNode> byNode() {
+      return byNode;
+    }
+
+    /**
+     * The accepted forwarding metadata used to select this remote endpoint.
+     *
+     * <p>This is empty for a direct request. It is present even when a forwarded request has no
+     * intermediate forwarded proxy endpoints.
+     *
+     * @return accepted remote forwarding metadata, if the selected endpoint was forwarded
+     */
+    @Override
+    public Optional<ForwardingInfo> forwarding() {
+      return forwarding;
+    }
+
+    /**
+     * @return the selected remote IP address, if the remote identity is an IP address
+     */
+    public Optional<InetAddress> ipAddress() {
+      return node instanceof RemoteNode.Ip ip ? Optional.of(ip.address()) : Optional.empty();
+    }
+
+    /**
+     * @return the numeric or obfuscated port attached to the selected remote node, if known
+     */
+    public Optional<NodePort> nodePort() {
+      return node.port();
+    }
+
+    /**
+     * @return the numeric source port of the selected remote node, if known
+     */
+    public Optional<Integer> port() {
+      return nodePort()
+          .filter(NodePort.Numeric.class::isInstance)
+          .map(NodePort.Numeric.class::cast)
+          .map(NodePort.Numeric::value);
+    }
+
+    /**
+     * @return the Scala version of this selected remote metadata
+     */
+    public play.api.mvc.request.RemoteInfo asScala() {
+      return play.api.mvc.request.RemoteInfo$.MODULE$.create(
+          node.asScala(),
+          OptionConverters.toScala(byNode.map(RemoteNode::asScala)),
+          OptionConverters.toScala(forwarding.map(ForwardingInfo::asScala)));
+    }
+  }
+
   public interface RequestHeader {
 
     /**
@@ -205,6 +718,27 @@ public class Http {
      */
     default Long id() {
       return (Long) attrs().get(RequestAttrKey.Id().asJava());
+    }
+
+    /**
+     * @return metadata about the network connection directly terminating at Play
+     */
+    default TransportConnection transport() {
+      return asScala().transport().asJava();
+    }
+
+    /**
+     * @return the normalized effective request scheme
+     */
+    default Scheme scheme() {
+      return asScala().scheme().asJava();
+    }
+
+    /**
+     * @return the normalized effective request authority, if present
+     */
+    default Optional<RequestAuthority> authority() {
+      return OptionConverters.toJava(asScala().authority()).map(value -> value.asJava());
     }
 
     /**
@@ -223,19 +757,25 @@ public class Http {
     String version();
 
     /**
-     * The client IP address.
+     * The selected remote metadata for this request.
      *
-     * <p>Retrieves the last untrusted proxy from the Forwarded-Headers or the
-     * X-Forwarded-*-Headers.
+     * <p>This may identify an IP address, an RFC 7239 obfuscated identity, or RFC 7239 {@code
+     * unknown}. Direct transport peer and TLS metadata are exposed separately by {@link
+     * #transport()}.
      *
-     * @return the remote address
+     * @return the selected remote metadata
      */
-    String remoteAddress();
+    default RemoteInfo remote() {
+      return asScala().remote().asJava();
+    }
 
     /**
-     * @return true if the client is using SSL
+     * @return true when the normalized effective request scheme is HTTPS, including when selected
+     *     from trusted forwarding metadata
      */
-    boolean secure();
+    default boolean secure() {
+      return scheme().isSecure();
+    }
 
     /**
      * @return a map of typed attributes associated with the request.
@@ -312,9 +852,15 @@ public class Http {
     Request withBody(RequestBody body);
 
     /**
-     * @return the request host
+     * Returns the effective request host, optionally including its port. Trusted forwarding
+     * information selected by the server takes precedence over the request-target authority and the
+     * {@code Host} header. This does not modify {@link #uri()} or {@link #path()}.
+     *
+     * @return the effective request host
      */
-    String host();
+    default String host() {
+      return authority().map(RequestAuthority::render).orElse("");
+    }
 
     /**
      * @return the URI path
@@ -460,14 +1006,6 @@ public class Http {
      * @return The request charset, which comes from the content type header, if it exists.
      */
     Optional<String> charset();
-
-    /**
-     * The X509 certificate chain presented by a client during SSL requests.
-     *
-     * @return The chain of X509Certificates used for the request if the request is secure and the
-     *     server supports it.
-     */
-    Optional<List<X509Certificate>> clientCertificateChain();
 
     /**
      * Create a new version of this object with the given transient language set. The transient
@@ -631,10 +1169,18 @@ public class Http {
      * @param requestFactory the incoming request factory
      */
     public RequestBuilder(RequestFactory requestFactory) {
+      play.api.mvc.request.PeerEndpoint peer =
+          PeerEndpoint$.MODULE$.create(
+              InetAddresses.forString("127.0.0.1"), OptionConverters.toScala(Optional.empty()));
+      play.api.mvc.request.TransportConnection transport =
+          TransportConnection$.MODULE$.create(peer, OptionConverters.toScala(Optional.empty()));
+      play.api.mvc.request.RemoteInfo remote = RemoteInfo$.MODULE$.fromPeer(peer);
       req =
           requestFactory.createRequest(
-              RemoteConnection$.MODULE$.apply(
-                  "127.0.0.1", false, OptionConverters.toScala(Optional.empty())),
+              transport,
+              remote,
+              play.api.mvc.request.Scheme$.MODULE$.Http(),
+              OptionConverters.toScala(Optional.empty()),
               "GET",
               RequestTarget$.MODULE$.apply("/", "/", Map$.MODULE$.empty()),
               "HTTP/1.1",
@@ -1086,13 +1632,21 @@ public class Http {
       return req.uri();
     }
 
+    /**
+     * Sets the request target URI without changing the effective {@link #scheme()} or {@link
+     * #authority()}.
+     *
+     * @param uri the request target URI
+     * @return the builder instance
+     */
     public RequestBuilder uri(URI uri) {
       req = JavaHelpers$.MODULE$.updateRequestWithUri(req, uri);
       return this;
     }
 
     /**
-     * Sets the uri.
+     * Sets the request target URI without changing the effective {@link #scheme()} or {@link
+     * #authority()}.
      *
      * @param str the uri
      * @return the builder instance
@@ -1107,40 +1661,74 @@ public class Http {
     }
 
     /**
-     * @param secure true if the request is secure
+     * @return the normalized effective request scheme.
+     */
+    public Scheme scheme() {
+      return req.scheme().asJava();
+    }
+
+    /**
+     * @param scheme the effective request scheme
+     * @return the builder instance
+     */
+    public RequestBuilder scheme(Scheme scheme) {
+      req = req.withScheme(scheme.asScala());
+      return this;
+    }
+
+    /**
+     * @return the normalized effective request authority, if present.
+     */
+    public Optional<RequestAuthority> authority() {
+      return OptionConverters.toJava(req.authority()).map(value -> value.asJava());
+    }
+
+    /**
+     * @param authority the effective request authority
+     * @return the builder instance
+     */
+    public RequestBuilder authority(RequestAuthority authority) {
+      return authority(Optional.of(authority));
+    }
+
+    /**
+     * @param authority the effective request authority, or empty to remove it
+     * @return the builder instance
+     */
+    public RequestBuilder authority(Optional<RequestAuthority> authority) {
+      Objects.requireNonNull(authority, "authority");
+      req = req.withAuthority(OptionConverters.toScala(authority.map(RequestAuthority::asScala)));
+      return this;
+    }
+
+    /**
+     * @param secure true to use the HTTPS scheme, false to use HTTP
      * @return the builder instance
      */
     public RequestBuilder secure(boolean secure) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  req.connection().remoteAddress(),
-                  secure,
-                  req.connection().clientCertificateChain()));
-      return this;
+      return scheme(secure ? Scheme.HTTPS : Scheme.HTTP);
     }
 
     /**
      * @return the status if the request is secure
      */
     public boolean secure() {
-      return req.connection().secure();
+      return req.secure();
     }
 
     /**
-     * @return the host name from the header
+     * @return the normalized effective host, or an empty string when the request has no authority
      */
     public String host() {
-      return headers().get(HeaderNames.HOST).orElse(null);
+      return req.host();
     }
 
     /**
-     * @param host sets the host in the header
+     * @param host parses and sets the effective authority and its canonical Host header
      * @return the builder instance
      */
     public RequestBuilder host(String host) {
-      header(HeaderNames.HOST, host);
-      return this;
+      return authority(RequestAuthority.parse(host));
     }
 
     /**
@@ -1157,23 +1745,7 @@ public class Http {
      * @return the builder instance
      */
     public RequestBuilder path(String path) {
-      // Update URI with new path element
-      URI existingUri = req.target().uri();
-      URI newUri;
-      try {
-        newUri =
-            new URI(
-                existingUri.getScheme(),
-                existingUri.getUserInfo(),
-                existingUri.getHost(),
-                existingUri.getPort(),
-                path,
-                existingUri.getQuery(),
-                existingUri.getFragment());
-      } catch (URISyntaxException e) {
-        throw new IllegalArgumentException("New path couldn't be parsed", e);
-      }
-      uri(newUri);
+      req = JavaHelpers$.MODULE$.updateRequestWithPath(req, path);
       return this;
     }
 
@@ -1211,30 +1783,69 @@ public class Http {
     /**
      * Set the headers to be used by the request builder.
      *
+     * <p>Supplying exactly one {@code Host} value replaces the effective {@link #authority()} and
+     * canonicalizes the resulting {@code Host} header. Duplicate, empty-list, or invalid {@code
+     * Host} values are rejected. If {@code Host} is absent, the existing effective authority is
+     * preserved.
+     *
      * @param headers the headers to be replaced
      * @return the builder instance
      */
     public RequestBuilder headers(Headers headers) {
-      req = req.withHeaders(headers.asScala());
+      Objects.requireNonNull(headers, "headers");
+      List<String> hostValues = headers.getAll(HeaderNames.HOST);
+
+      if (headers.contains(HeaderNames.HOST) && hostValues.size() != 1) {
+        throw new IllegalArgumentException(
+            "RequestBuilder.headers requires exactly one Host value; use authority to replace the"
+                + " effective authority");
+      }
+
+      if (hostValues.size() == 1) {
+        RequestAuthority newAuthority = RequestAuthority.parse(hostValues.get(0));
+        String hostHeaderName = actualHeaderName(headers, HeaderNames.HOST);
+        req =
+            req.withAuthority(OptionConverters.toScala(Optional.of(newAuthority.asScala())))
+                .withHeaders(headers.removing(hostHeaderName).asScala());
+      } else {
+        req = req.withHeaders(headers.asScala());
+      }
       return this;
     }
 
     /**
+     * A single case-insensitive {@code Host} value replaces the effective {@link #authority()}.
+     * Multiple or invalid {@code Host} values are rejected.
+     *
      * @param key the key for in the header
      * @param values the values associated with the key
      * @return the builder instance
      */
     public RequestBuilder header(String key, List<String> values) {
+      if (key.equalsIgnoreCase(HeaderNames.HOST)) {
+        Headers currentHeaders = headers();
+        return this.headers(
+            currentHeaders.removing(actualHeaderName(currentHeaders, key)).adding(key, values));
+      }
       return this.headers(headers().adding(key, values));
     }
 
     /**
+     * A case-insensitive {@code Host} key replaces the effective {@link #authority()}.
+     *
      * @param key the key for in the header
      * @param value the value (one) associated with the key
      * @return the builder instance
      */
     public RequestBuilder header(String key, String value) {
-      return this.headers(headers().adding(key, value));
+      return this.header(key, Collections.singletonList(value));
+    }
+
+    private static String actualHeaderName(Headers headers, String name) {
+      return headers.asMap().keySet().stream()
+          .filter(value -> value.equalsIgnoreCase(name))
+          .findFirst()
+          .orElse(name);
     }
 
     /**
@@ -1326,46 +1937,34 @@ public class Http {
     }
 
     /**
-     * @return the remote address
+     * @return the selected remote metadata
      */
-    public String remoteAddress() {
-      return req.connection().remoteAddressString();
+    public RemoteInfo remote() {
+      return req.remote().asJava();
     }
 
     /**
-     * @param remoteAddress sets the remote address
+     * @param remote sets the selected remote metadata
      * @return the builder instance
      */
-    public RequestBuilder remoteAddress(String remoteAddress) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  remoteAddress,
-                  req.connection().secure(),
-                  req.connection().clientCertificateChain()));
+    public RequestBuilder remote(RemoteInfo remote) {
+      req = req.withRemote(remote.asScala());
       return this;
     }
 
     /**
-     * @return the client X509Certificates if they have been set
+     * @return metadata about the network connection directly terminating at Play
      */
-    public Optional<List<X509Certificate>> clientCertificateChain() {
-      return OptionConverters.toJava(req.connection().clientCertificateChain())
-          .map(list -> new ArrayList<>(Scala.asJava(list)));
+    public TransportConnection transport() {
+      return req.transport().asJava();
     }
 
     /**
-     * @param clientCertificateChain sets the X509Certificates to use
+     * @param transport sets the direct transport metadata
      * @return the builder instance
      */
-    public RequestBuilder clientCertificateChain(List<X509Certificate> clientCertificateChain) {
-      req =
-          req.withConnection(
-              RemoteConnection$.MODULE$.apply(
-                  req.connection().remoteAddress(),
-                  req.connection().secure(),
-                  OptionConverters.toScala(
-                      Optional.ofNullable(Scala.asScala(clientCertificateChain)))));
+    public RequestBuilder transport(TransportConnection transport) {
+      req = req.withTransport(transport.asScala());
       return this;
     }
 

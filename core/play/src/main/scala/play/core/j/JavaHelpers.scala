@@ -4,10 +4,9 @@
 
 package play.core.j
 
-import java.net.InetAddress
 import java.net.URI
+import java.net.URISyntaxException
 import java.net.URLDecoder
-import java.security.cert.X509Certificate
 import java.util
 import java.util.Locale
 import java.util.Optional
@@ -23,8 +22,8 @@ import play.api.i18n._
 import play.api.i18n.Langs
 import play.api.i18n.MessagesApi
 import play.api.mvc._
-import play.api.mvc.request.RemoteConnection
 import play.api.mvc.request.RequestTarget
+import play.api.mvc.request.Scheme
 import play.api.Configuration
 import play.api.Environment
 import play.i18n
@@ -93,25 +92,7 @@ trait JavaHelpers {
   }
 
   def updateRequestWithUri[A](req: Request[A], parsedUri: URI): Request[A] = {
-    // First, update the secure flag for this request, but only if the scheme
-    // was set.
-    def updateSecure(r: Request[A], newSecure: Boolean): Request[A] = {
-      val c = r.connection
-      r.withConnection(new RemoteConnection {
-        override def remoteAddress: InetAddress                           = c.remoteAddress
-        override def remoteAddressString: String                          = c.remoteAddressString
-        override def secure: Boolean                                      = newSecure
-        override def clientCertificateChain: Option[Seq[X509Certificate]] = c.clientCertificateChain
-      })
-    }
-    val reqWithConnection = parsedUri.getScheme match {
-      case "http"  => updateSecure(req, newSecure = false)
-      case "https" => updateSecure(req, newSecure = true)
-      case _       => req
-    }
-
-    // Next create a target based on the URI
-    reqWithConnection.withTarget(new RequestTarget {
+    req.withTarget(new RequestTarget {
       override val uri: URI                           = parsedUri
       override val uriString: String                  = parsedUri.toString
       override val path: String                       = parsedUri.getRawPath
@@ -134,6 +115,37 @@ trait JavaHelpers {
         }
       }
     })
+  }
+
+  /** Replace only the request-target path while preserving its raw authority, query, and fragment. */
+  def updateRequestWithPath[A](req: Request[A], path: String): Request[A] = {
+    val encodedPath = try {
+      new URI(null, null, path, null).getRawPath
+    } catch {
+      case error: URISyntaxException => throw new IllegalArgumentException("New path couldn't be parsed", error)
+    }
+    val currentTarget = req.target.uriString
+    val suffixStart   = Seq(currentTarget.indexOf('?'), currentTarget.indexOf('#'))
+      .filter(_ >= 0)
+      .minOption
+      .getOrElse(currentTarget.length)
+    val schemeSeparator = currentTarget.indexOf("://")
+    val absolute        =
+      schemeSeparator > 0 && Scheme.parse(currentTarget.substring(0, schemeSeparator)).isRight
+    val pathStart = if (absolute) {
+      val slash = currentTarget.indexOf('/', schemeSeparator + 3)
+      if (slash >= 0 && slash < suffixStart) slash else suffixStart
+    } else {
+      0
+    }
+
+    if (absolute && encodedPath.nonEmpty && !encodedPath.startsWith("/")) {
+      throw new IllegalArgumentException("An absolute request target path must be empty or start with '/'")
+    }
+
+    val updatedTarget =
+      currentTarget.substring(0, pathStart) + encodedPath + currentTarget.substring(suffixStart)
+    req.withTarget(req.target.withUriString(updatedTarget).withPath(encodedPath))
   }
 
   /**
@@ -195,11 +207,13 @@ object JavaHelpers extends JavaHelpers {
 class RequestHeaderImpl(header: RequestHeader) extends JRequestHeader {
   override def asScala: RequestHeader = header
 
-  override def uri: String           = header.uri
-  override def method: String        = header.method
-  override def version: String       = header.version
-  override def remoteAddress: String = header.remoteAddress
-  override def secure: Boolean       = header.secure
+  override def uri: String                                = header.uri
+  override def method: String                             = header.method
+  override def version: String                            = header.version
+  override def scheme: Http.Scheme                        = header.scheme.asJava
+  override def authority: Optional[Http.RequestAuthority] = header.authority.map(_.asJava).toJava
+  override def remote: Http.RemoteInfo                    = header.remote.asJava
+  override def secure: Boolean                            = header.secure
 
   override def attrs: TypedMap                                                                   = new TypedMap(header.attrs)
   override def withAttrs(newAttrs: TypedMap): JRequestHeader                                     = header.withAttrs(newAttrs.asScala).asJava
@@ -225,8 +239,6 @@ class RequestHeaderImpl(header: RequestHeader) extends JRequestHeader {
   override def accepts(mediaType: String): Boolean = header.accepts(mediaType)
 
   override def cookies = JavaHelpers.cookiesToJavaCookies(header.cookies)
-
-  override def clientCertificateChain() = header.clientCertificateChain.map(_.asJava).toJava
 
   @deprecated
   override def getQueryString(key: String): String = {

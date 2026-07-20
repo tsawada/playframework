@@ -5,14 +5,19 @@
 package play.api.mvc
 
 import play.api.http.HeaderNames
-import play.api.mvc.request.RemoteConnection
+import play.api.mvc.request.RequestAuthority
+import play.api.mvc.request.Scheme
 import play.api.test.FakeRequest
 
 class HttpSpec extends org.specs2.mutable.Specification {
   title("HTTP")
 
+  private def withSecureScheme(req: RequestHeader): RequestHeader = req.withScheme(Scheme.Https)
+
   "Absolute URL" should {
-    val req = FakeRequest().withHeaders(HeaderNames.HOST -> "playframework.com")
+    // Authority is canonical request state. Generic header replacement cannot
+    // change Host implicitly; tests and applications must use withAuthority for that operation.
+    val req = FakeRequest().withAuthority(Some(RequestAuthority.parseOrThrow("playframework.com")))
 
     "have HTTP scheme" in {
       (Call("GET", "/playframework")
@@ -27,8 +32,7 @@ class HttpSpec extends org.specs2.mutable.Specification {
     "have HTTPS scheme" in {
       (Call("GET", "/playframework")
         .absoluteURL()(
-          using req
-            .withConnection(RemoteConnection(req.connection.remoteAddress, true, req.connection.clientCertificateChain))
+          using withSecureScheme(req)
         )
         .aka("absolute URL 1") must_== "https://playframework.com/playframework").and(
         Call("GET", "/playframework")
@@ -39,7 +43,7 @@ class HttpSpec extends org.specs2.mutable.Specification {
   }
 
   "Web socket URL" should {
-    val req = FakeRequest().withHeaders(HeaderNames.HOST -> "playframework.com")
+    val req = FakeRequest().withAuthority(Some(RequestAuthority.parseOrThrow("playframework.com")))
 
     "have ws scheme" in {
       (Call("GET", "/playframework")
@@ -54,8 +58,7 @@ class HttpSpec extends org.specs2.mutable.Specification {
     "have wss scheme" in {
       (Call("GET", "/playframework")
         .webSocketURL()(
-          using req
-            .withConnection(RemoteConnection(req.connection.remoteAddress, true, req.connection.clientCertificateChain))
+          using withSecureScheme(req)
         )
         .aka("absolute URL 1") must_== "wss://playframework.com/playframework").and(
         Call("GET", "/playframework")
