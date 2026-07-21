@@ -282,6 +282,21 @@ class HelpersSpec extends Specification {
         request.scheme mustEqual scheme
       }
 
+      "preserve the positional request-metadata parameter order" in {
+        val transport = TransportConnection(
+          PeerEndpoint(InetAddresses.forString("192.0.2.10"), Some(53124)),
+          None
+        )
+        val remote = RemoteInfo.fromPeer(PeerEndpoint(InetAddresses.forString("198.51.100.20"), Some(443)))
+        val scheme = Scheme.Https
+
+        val request = FakeRequest("GET", "/uri", FakeHeaders(), AnyContentAsEmpty, transport, remote, scheme)
+
+        request.transport mustEqual transport
+        request.remote mustEqual remote
+        request.scheme mustEqual scheme
+      }
+
       "synchronize Host header helpers with the effective authority" in {
         val fromHeaders = FakeRequest().withHeaders(Headers("host" -> "EXAMPLE.com:00080", "X-Test" -> "one"))
 

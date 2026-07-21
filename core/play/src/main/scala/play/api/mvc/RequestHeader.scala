@@ -30,7 +30,61 @@ trait RequestHeader {
 
   /** Return a copy with different direct transport metadata. */
   def withTransport(newTransport: TransportConnection): RequestHeader =
-    new RequestHeaderImpl(remote, method, target, version, headers, attrs, newTransport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      newTransport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
+
+  /** The effective X.509 client certificate selected for this request, if present. */
+  def clientCertificate: Option[ClientCertificateInfo]
+
+  /** Return a copy with different effective client certificate information. */
+  def withClientCertificate(newClientCertificate: Option[ClientCertificateInfo]): RequestHeader =
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      newClientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
+
+  /** Accepted `X-Forwarded-Client-Cert` assertions in client-to-Play order. */
+  def xForwardedClientCertificates: Vector[XForwardedClientCert]
+
+  /** Return a copy with a different ordered sequence of accepted XFCC assertions. */
+  def withXForwardedClientCertificates(
+      newXForwardedClientCertificates: Seq[XForwardedClientCert]
+  ): RequestHeader = {
+    require(newXForwardedClientCertificates != null, "The XFCC assertion sequence must not be null")
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      newXForwardedClientCertificates.toVector
+    )
+  }
 
   /**
    * The normalized effective request scheme.
@@ -41,7 +95,19 @@ trait RequestHeader {
 
   /** Return a copy with a different effective request scheme. */
   def withScheme(newScheme: Scheme): RequestHeader =
-    new RequestHeaderImpl(remote, method, target, version, headers, attrs, transport, newScheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      newScheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The normalized effective request authority, if the request has one.
@@ -56,7 +122,19 @@ trait RequestHeader {
    * This is the only copy operation that changes the canonical `Host` header.
    */
   def withAuthority(newAuthority: Option[RequestAuthority]): RequestHeader =
-    new RequestHeaderImpl(remote, method, target, version, headers, attrs, transport, scheme, newAuthority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      newAuthority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The selected remote-node metadata for this request.
@@ -65,7 +143,19 @@ trait RequestHeader {
 
   /** Return a copy with different selected remote-node metadata. */
   def withRemote(newRemote: RemoteInfo): RequestHeader =
-    new RequestHeaderImpl(newRemote, method, target, version, headers, attrs, transport, scheme, authority)
+    new RequestHeaderImpl(
+      newRemote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The request id. The request id is stored as an attribute indexed by [[play.api.mvc.request.RequestAttrKey.Id]].
@@ -81,7 +171,19 @@ trait RequestHeader {
    * Return a new copy of the request with its method changed.
    */
   def withMethod(newMethod: String): RequestHeader =
-    new RequestHeaderImpl(remote, newMethod, target, version, headers, attrs, transport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      newMethod,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The target of the HTTP request, i.e. the URI or path that was
@@ -95,7 +197,19 @@ trait RequestHeader {
    * This operation preserves the effective [[scheme]] and [[authority]].
    */
   def withTarget(newTarget: RequestTarget): RequestHeader =
-    new RequestHeaderImpl(remote, method, newTarget, version, headers, attrs, transport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      newTarget,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The complete request URI, containing both path and query string.
@@ -122,7 +236,19 @@ trait RequestHeader {
    * Return a new copy of the request with its HTTP version changed.
    */
   def withVersion(newVersion: String): RequestHeader =
-    new RequestHeaderImpl(remote, method, target, newVersion, headers, attrs, transport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      newVersion,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * The parsed query string. This method delegates to `target.queryMap`.
@@ -149,8 +275,10 @@ trait RequestHeader {
       RequestHeader.validateReplacementHeaders(newHeaders, authority),
       attrs,
       transport,
+      clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /** Whether the effective request scheme is HTTPS. */
@@ -169,7 +297,19 @@ trait RequestHeader {
    * @return The new version of this object with the attributes attached.
    */
   def withAttrs(newAttrs: TypedMap): RequestHeader =
-    new RequestHeaderImpl(remote, method, target, version, headers, newAttrs, transport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      newAttrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * Create a new versions of this object with the given attribute attached to it.
@@ -333,7 +473,20 @@ trait RequestHeader {
    * @return A new request with the body attached to the header.
    */
   def withBody[A](body: A): Request[A] =
-    new RequestImpl[A](remote, method, target, version, headers, attrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
 
   /**
    * Create a new versions of this object with the given transient language set.
@@ -652,15 +805,25 @@ private[play] class RequestHeaderImpl(
     requestHeaders: Headers,
     override val attrs: TypedMap,
     override val transport: TransportConnection,
+    override val clientCertificate: Option[ClientCertificateInfo],
     override val scheme: Scheme,
-    override val authority: Option[RequestAuthority]
+    override val authority: Option[RequestAuthority],
+    override val xForwardedClientCertificates: Vector[XForwardedClientCert] = Vector.empty
 ) extends RequestHeader {
   require(remote != null, "Selected remote metadata must not be null")
   require(transport != null, "Direct transport metadata must not be null")
+  require(
+    clientCertificate != null && clientCertificate.forall(_ != null),
+    "Effective client certificate option must not be null or contain null"
+  )
   require(scheme != null, "Effective request scheme must not be null")
   require(
     authority != null && authority.forall(_ != null),
     "Effective request authority option must not be null or contain null"
+  )
+  require(
+    xForwardedClientCertificates != null && xForwardedClientCertificates.forall(_ != null),
+    "The XFCC assertion sequence must not be null or contain null"
   )
 
   override val headers: Headers = RequestHeader.canonicalHeaders(requestHeaders, authority)

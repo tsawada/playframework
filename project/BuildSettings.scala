@@ -664,6 +664,23 @@ object BuildSettings {
       ProblemFilters.exclude[IncompatibleResultTypeProblem](
         "play.core.server.common.ForwardedHeaderHandler#ParsedForwardedEntry._1"
       ),
+      // Add source-aware client certificate support for direct TLS and trusted forwarding headers
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.test.FakeRequest.apply"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("play.api.test.FakeRequestFactory.apply"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.http.HeaderNames.CLIENT_CERT"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.http.HeaderNames.CLIENT_CERT_CHAIN"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.http.HeaderNames.X_FORWARDED_CLIENT_CERT"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.http.HeaderNames.play$api$http$HeaderNames$_setter_$CLIENT_CERT_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.http.HeaderNames.play$api$http$HeaderNames$_setter_$CLIENT_CERT_CHAIN_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem](
+        "play.api.http.HeaderNames.play$api$http$HeaderNames$_setter_$X_FORWARDED_CLIENT_CERT_="
+      ),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.RequestHeader.clientCertificate"),
+      ProblemFilters.exclude[ReversedMissingMethodProblem]("play.api.mvc.RequestHeader.xForwardedClientCertificates"),
     ),
     (Compile / unmanagedSourceDirectories) += {
       val suffix = CrossVersion.partialVersion(scalaVersion.value) match {

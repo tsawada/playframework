@@ -26,6 +26,14 @@ Matcher configuration is parsed strictly without DNS resolution. Hostnames, endp
 
 `RequestHeader.transport` in Scala and `Http.RequestHeader.transport()` in Java retain the immutable network connection directly terminating at Play. `transport.peer` contains the socket peer address and source port, while `transport.tls` describes actual peer-to-Play TLS and peer certificates. Selecting a forwarded remote identity, scheme, or authority never replaces these transport facts.
 
+## Source-aware client certificates
+
+`RequestHeader.clientCertificate` in Scala and `Http.RequestHeader.clientCertificate()` in Java expose the effective X.509 client certificate selected for application use. The value separates the leaf certificate from the rest of its chain and records whether Play obtained it from direct transport TLS, the standardized RFC 9440 `Client-Cert` fields, or `X-Forwarded-Client-Cert`.
+
+Selecting a trusted forwarded certificate never replaces `RequestHeader.transport.tls`, which continues to describe the physical connection terminating at Play. For `X-Forwarded-Client-Cert`, `RequestHeader.xForwardedClientCertificates` also retains the accepted assertion metadata, including identities that do not carry a certificate.
+
+Forwarded certificate interpretation is disabled by default and uses a dedicated trusted-proxy list, parser limits, and protocol mode. See [[Forwarded client certificates|HTTPServer#forwarded-client-certificates]] for the supported RFC 9440 and sanitized Envoy XFCC profiles and their deployment requirements.
+
 ## First-class Request Scheme and Authority
 
 The effective request scheme and authority are now first-class immutable values through `RequestHeader.scheme` and `RequestHeader.authority`, with corresponding Java APIs. Schemes use RFC 3986 syntax, and authorities distinguish registered names, IPv4, IPv6, and IPvFuture while preserving arbitrary-size decimal URI ports. `request.secure`, `request.host`, `request.domain`, and the canonical exposed `Host` field are derived from these values.

@@ -34,6 +34,7 @@ import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.TransportConnection
 import play.api.mvc.request.TransportTls
 import play.api.Logger
+import play.core.server.common.ClientCertificateHeaderHandler
 import play.core.server.common.ForwardedHeaderHandler
 import play.core.server.common.PathAndQueryParser
 import play.core.server.common.ServerResultUtils
@@ -46,6 +47,7 @@ import play.mvc.Http.HeaderNames
 private[server] class PekkoModelConversion(
     resultUtils: ServerResultUtils,
     forwardedHeaderHandler: ForwardedHeaderHandler,
+    clientCertificateHeaderHandler: ClientCertificateHeaderHandler,
     illegalResponseHeaderValue: ParserSettings.IllegalResponseHeaderValueProcessingMode
 ) {
   private val logger = Logger(getClass)
@@ -104,8 +106,9 @@ private[server] class PekkoModelConversion(
     val effectiveScheme = RequestHeader
       .effectiveScheme(initialTarget.scheme, directScheme, forwarding.scheme)
       .fold(error => throw new IllegalArgumentException(error), identity)
-    val normalizedTarget = RequestHeader.normalizeRequestTargetPath(requestTarget, initialTarget)
-    val attrs            = TypedMap(
+    val normalizedTarget   = RequestHeader.normalizeRequestTargetPath(requestTarget, initialTarget)
+    val clientCertificates = clientCertificateHeaderHandler.clientCertificates(transport, headers)
+    val attrs              = TypedMap(
       // This is the earliest stage of a Play request at which we can set an id.
       RequestAttrKey.Id -> RequestIdProvider.freshId(),
     )
@@ -117,8 +120,10 @@ private[server] class PekkoModelConversion(
       headers,
       attrs,
       transport,
+      clientCertificates.clientCertificate,
       effectiveScheme,
-      forwarding.authority
+      forwarding.authority,
+      clientCertificates.xForwardedClientCertificates
     )
   }
 
@@ -136,9 +141,12 @@ private[server] class PekkoModelConversion(
       secureProtocol: Boolean,
       remoteAddress: InetSocketAddress,
       requestTarget: RequestTarget,
-      request: HttpRequest
+      request: HttpRequest,
+      requestFailure: Throwable
   ): RequestHeader = {
-    val transport     = createTransport(remoteAddress, secureProtocol, request)
+    val transport          = createTransport(remoteAddress, secureProtocol, request)
+    val clientCertificates =
+      clientCertificateHeaderHandler.clientCertificatesForErrorRequest(transport, headers, requestFailure)
     val rawRemote     = RemoteInfo.fromPeer(transport.peer)
     val directScheme  = RequestHeader.initialScheme(transport)
     val initialTarget = RequestHeader
@@ -165,8 +173,10 @@ private[server] class PekkoModelConversion(
       headers,
       attrs,
       transport,
+      clientCertificates.clientCertificate,
       scheme,
-      forwarding.authority
+      forwarding.authority,
+      clientCertificates.xForwardedClientCertificates
     )
   }
 

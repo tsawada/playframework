@@ -19,14 +19,14 @@ Java request accessors migrate as follows:
 | Removed API | Replacement |
 | --- | --- |
 | `Http.RequestHeader.remoteAddress()` | Use `remote().identity()` for the complete selected identity, which can also be `unknown` or obfuscated. Use `remote().ipAddress()` when the application specifically requires an IP address. |
-| `Http.RequestHeader.clientCertificateChain()` | Use `transport().tls().map(Http.TransportTls::peerCertificates)` for certificates presented on the connection directly terminating at Play. |
+| `Http.RequestHeader.clientCertificateChain()` | Use `transport().tls().map(Http.TransportTls::peerCertificates)` to preserve the old direct-connection semantics. Use `clientCertificate()` when the application intentionally needs Play's new effective certificate selection. |
 
 Java test builders replace the former connection accessors and setters with the corresponding typed values:
 
 | Removed API | Replacement |
 | --- | --- |
 | `RequestBuilder.remoteAddress()` and `remoteAddress(...)` | Use `remote()` and `remote(...)` with a `RemoteInfo` containing a typed `RemoteNode`. |
-| `RequestBuilder.clientCertificateChain()` and `clientCertificateChain(...)` | Use `transport()` and `transport(...)` with certificates stored in `TransportTls`. |
+| `RequestBuilder.clientCertificateChain()` and `clientCertificateChain(...)` | Use `transport()` and `transport(...)` with certificates stored in `TransportTls` for direct TLS metadata. Set `clientCertificate(...)` separately when code under test reads the effective certificate. |
 
 For example:
 
@@ -42,15 +42,21 @@ Http.PeerEndpoint peer =
 Http.TransportConnection transport =
     new Http.TransportConnection(
         peer, Optional.of(new Http.TransportTls(certificates)));
+Http.ClientCertificateInfo clientCertificate =
+    new Http.ClientCertificateInfo(
+        certificates.get(0),
+        certificates.subList(1, certificates.size()),
+        Http.ClientCertificateSource.DIRECT_TRANSPORT);
 
 Http.RequestBuilder request =
     new Http.RequestBuilder()
         .remote(remote)
         .transport(transport)
+        .clientCertificate(clientCertificate)
         .scheme(Http.Scheme.HTTPS);
 ```
 
-The full Scala `FakeRequest.apply` overload likewise replaces `remoteAddress`, `secure`, and `clientCertificateChain` with `remote`, `scheme`, and `transport`. Code that previously changed the combined value through `withConnection` should now change only the relevant dimension with `withRemote`, `withScheme`, or `withTransport`:
+The full Scala `FakeRequest.apply` overload likewise replaces `remoteAddress`, `secure`, and `clientCertificateChain` with separate `remote`, `scheme`, `transport`, and effective-certificate metadata. Code that previously changed the combined value through `withConnection` should now change only the relevant dimension with `withRemote`, `withScheme`, `withTransport`, or `withClientCertificate`:
 
 ```scala
 val remote = RemoteInfo.ip(
@@ -59,10 +65,18 @@ val remote = RemoteInfo.ip(
 )
 val peer      = PeerEndpoint(InetAddress.getByName("127.0.0.1"), Some(44000))
 val transport = TransportConnection(peer, Some(TransportTls(certificates)))
+val clientCertificate = certificates.headOption.map { certificate =>
+  ClientCertificateInfo(
+    certificate,
+    certificates.drop(1).toVector,
+    ClientCertificateSource.DirectTransport
+  )
+}
 
 val request = FakeRequest(GET, "/")
   .withRemote(remote)
   .withTransport(transport)
+  .withClientCertificate(clientCertificate)
   .withScheme(Scheme.Https)
 ```
 
@@ -81,6 +95,16 @@ request.remote.ipAddress // None
 request.remote.nodePort  // None, or a numeric/obfuscated NodePort
 request.secure           // true
 ```
+
+## Effective client certificates are separate from direct transport TLS
+
+`RequestHeader.transport.tls` always describes TLS on the connection directly terminating at Play. `RequestHeader.clientCertificate` is a separate effective value for application use, containing a leaf certificate, the remaining chain, and a `DirectTransport`, `Rfc9440`, or `XForwardedClientCert` source.
+
+When forwarded certificate handling is off, or the directly connected peer is not trusted for certificate assertions, Play selects an observed direct peer certificate with the `DirectTransport` source. When a trusted RFC 9440 or XFCC mode is enabled, the configured header protocol describes the original client instead. If that trusted proxy supplies no client-certificate assertion, the effective value is empty rather than falling back to the proxy's own transport certificate. The immutable direct TLS information remains available through `transport.tls` in every case.
+
+Custom Scala `RequestHeader` and `RequestFactory` implementations must provide and preserve both `clientCertificate` and the ordered `xForwardedClientCertificates` assertions. Test code sets these dimensions independently: use `FakeRequest.withClientCertificate` and `withXForwardedClientCertificates` in Scala, or `RequestBuilder.clientCertificate(...)` and `xForwardedClientCertificates(...)` in Java. Changing only `transport` deliberately does not rewrite either effective value.
+
+See [[Forwarded client certificates|HTTPServer#forwarded-client-certificates]] for protocol configuration, trust-boundary requirements, parser limits, and the distinction between certificate parsing and authentication or authorization.
 
 ## IP filter entries match typed remote identities
 

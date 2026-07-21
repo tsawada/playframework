@@ -79,6 +79,46 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
   /** Whether the backend passes an absolute-form request with an empty Host field to Play. */
   protected def backendPassesAbsoluteTargetWithEmptyHostToPlay: Boolean
 
+  // RFC 9440 Appendix A's leaf certificate (serial number 7).
+  private val forwardedClientCertificateBase64 =
+    "MIIBqDCCAU6gAwIBAgIBBzAKBggqhkjOPQQDAjA6MRswGQYDVQQKDBJMZXQncyBB" +
+      "dXRoZW50aWNhdGUxGzAZBgNVBAMMEkxBIEludGVybWVkaWF0ZSBDQTAeFw0yMDAx" +
+      "MTQyMjU1MzNaFw0yMTAxMjMyMjU1MzNaMA0xCzAJBgNVBAMMAkJDMFkwEwYHKoZI" +
+      "zj0CAQYIKoZIzj0DAQcDQgAE8YnXXfaUgmnMtOXU/IncWalRhebrXmckC8vdgJ1p" +
+      "5Be5F/3YC8OthxM4+k1M6aEAEFcGzkJiNy6J84y7uzo9M6NyMHAwCQYDVR0TBAIw" +
+      "ADAfBgNVHSMEGDAWgBRm3WjLa38lbEYCuiCPct0ZaSED2DAOBgNVHQ8BAf8EBAMC" +
+      "BsAwEwYDVR0lBAwwCgYIKwYBBQUHAwIwHQYDVR0RAQH/BBMwEYEPYmRjQGV4YW1w" +
+      "bGUuY29tMAoGCCqGSM49BAMCA0gAMEUCIBHda/r1vaL6G3VliL4/Di6YK0Q6bMje" +
+      "SkC3dFCOOB8TAiEAx/kHSB4urmiZ0NX5r5XarmPk0wmuydBVoU4hBVZ1yhk="
+
+  private val trustedForwardedCertificateProxyConfig = Seq(
+    "play.http.forwarded.clientCertificates.trustedProxies" -> Seq("127.0.0.0/8", "::1/128"),
+    "play.server.max-header-size"                           -> "64k"
+  )
+
+  private def percentEncode(value: String): String = {
+    val result = new StringBuilder(value.length * 3)
+    val hex    = "0123456789ABCDEF"
+    value.getBytes(java.nio.charset.StandardCharsets.US_ASCII).foreach { byte =>
+      val unsigned = byte & 0xff
+      if (
+        (unsigned >= 'a' && unsigned <= 'z') ||
+        (unsigned >= 'A' && unsigned <= 'Z') ||
+        (unsigned >= '0' && unsigned <= '9') ||
+        unsigned == '-' || unsigned == '.' || unsigned == '_' || unsigned == '~'
+      ) result.append(unsigned.toChar)
+      else {
+        result.append('%')
+        result.append(hex.charAt(unsigned >>> 4))
+        result.append(hex.charAt(unsigned & 0x0f))
+      }
+    }
+    result.result()
+  }
+
+  private def forwardedClientCertificatePem: String =
+    s"-----BEGIN CERTIFICATE-----\n$forwardedClientCertificateBase64\n-----END CERTIFICATE-----\n"
+
   def withServerAndConfig[T](
       configuration: (String, Any)*
   )(action: (DefaultActionBuilder, PlayBodyParsers) => EssentialAction)(block: Port => T): T = {
@@ -427,6 +467,227 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         // HTTP request authorities model host[:port], not userinfo. Strict request conversion rejects
         // user@localhost, and both server backends must report that validation failure as a stable 400.
         response.status must_== BAD_REQUEST
+      }
+    }
+
+    "expose a trusted RFC 9440 client certificate as typed request metadata" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "rfc9440"))*
+      )((Action, _) =>
+        Action { request =>
+          val certificate = request.clientCertificate
+          Results.Ok(
+            Seq(
+              certificate.exists(_.source == play.api.mvc.request.ClientCertificateSource.Rfc9440),
+              certificate.map(_.certificate.getSerialNumber).getOrElse("none"),
+              certificate.fold(-1)(_.chain.size),
+              request.xForwardedClientCertificates.size
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Client-Cert" -> s":$forwardedClientCertificateBase64:"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true|7|0|0")
+      }
+    }
+
+    "ignore a malformed RFC 9440 client certificate from a trusted proxy" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "rfc9440"))*
+      )((Action, _) => Action(request => Results.Ok(request.clientCertificate.isEmpty.toString))) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Client-Cert" -> ":not base64:"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true")
+      }
+    }
+
+    "ignore a malformed RFC 9440 chain while retaining its valid leaf" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "rfc9440"))*
+      )((Action, _) =>
+        Action { request =>
+          Results.Ok(
+            request.clientCertificate
+              .map(certificate => s"${certificate.certificate.getSerialNumber}|${certificate.chain.size}")
+              .getOrElse("none")
+          )
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "Client-Cert"       -> s":$forwardedClientCertificateBase64:",
+              "Client-Cert-Chain" -> ":AQID:"
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("7|0")
+      }
+    }
+
+    "retain a trusted metadata-only X-Forwarded-Client-Cert assertion" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "x-forwarded-client-cert"))*
+      )((Action, _) =>
+        Action { request =>
+          request.xForwardedClientCertificates match {
+            case Vector(assertion) =>
+              Results.Ok(
+                Seq(
+                  request.clientCertificate.isEmpty,
+                  assertion.hash.contains("a" * 64),
+                  assertion.subject.contains(""),
+                  assertion.uris == Vector("spiffe://example.test/workload"),
+                  assertion.dnsNames == Vector("client.example.test")
+                ).mkString("|")
+              )
+            case assertions => Results.InternalServerError(s"unexpected assertion count: ${assertions.size}")
+          }
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map(
+              "X-Forwarded-Client-Cert" ->
+                s"Hash=${"a" * 64};Subject=\"\";URI=spiffe://example.test/workload;DNS=client.example.test"
+            ),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true|true|true|true|true")
+      }
+    }
+
+    "expose a certificate-bearing X-Forwarded-Client-Cert assertion and effective certificate" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "x-forwarded-client-cert"))*
+      )((Action, _) =>
+        Action { request =>
+          val certificate = request.clientCertificate
+          val assertion   = request.xForwardedClientCertificates.headOption
+          Results.Ok(
+            Seq(
+              certificate.exists(_.source == play.api.mvc.request.ClientCertificateSource.XForwardedClientCert),
+              certificate.map(_.certificate.getSerialNumber).getOrElse("none"),
+              certificate.fold(-1)(_.chain.size),
+              assertion.flatMap(_.certificate).exists(_.getSerialNumber.intValue == 7),
+              request.xForwardedClientCertificates.size
+            ).mkString("|")
+          )
+        }
+      ) { port =>
+        val encodedPem    = percentEncode(forwardedClientCertificatePem)
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("X-Forwarded-Client-Cert" -> s"Cert=$encodedPem"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true|7|0|true|1")
+      }
+    }
+
+    "reject malformed forwarded client-certificate metadata from a trusted proxy" in {
+      withServerAndConfig(
+        (trustedForwardedCertificateProxyConfig :+
+          ("play.http.forwarded.clientCertificates.mode" -> "x-forwarded-client-cert"))*
+      )((Action, _) => Action(Results.Ok)) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port, checkClosed = true)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("X-Forwarded-Client-Cert" -> "Cert=%ZZ"),
+            ""
+          )
+        )
+
+        response.status must_== BAD_REQUEST
+      }
+    }
+
+    "ignore malformed forwarded client-certificate fields while handling is off" in {
+      withServerAndConfig("play.http.forwarded.clientCertificates.mode" -> "off")((Action, _) =>
+        Action { request =>
+          Results.Ok(s"${request.clientCertificate.isEmpty}|${request.xForwardedClientCertificates.isEmpty}")
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("Client-Cert" -> ":not base64:", "X-Forwarded-Client-Cert" -> "Cert=%ZZ"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true|true")
+      }
+    }
+
+    "ignore malformed forwarded client-certificate metadata from an untrusted peer" in {
+      withServerAndConfig(
+        "play.http.forwarded.clientCertificates.mode"           -> "x-forwarded-client-cert",
+        "play.http.forwarded.clientCertificates.trustedProxies" -> Seq("192.0.2.0/24")
+      )((Action, _) =>
+        Action { request =>
+          Results.Ok(s"${request.clientCertificate.isEmpty}|${request.xForwardedClientCertificates.isEmpty}")
+        }
+      ) { port =>
+        val Seq(response) = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/",
+            "HTTP/1.1",
+            Map("X-Forwarded-Client-Cert" -> "Cert=%ZZ"),
+            ""
+          )
+        )
+
+        response.status must_== OK
+        response.body must beLeft("true|true")
       }
     }
 

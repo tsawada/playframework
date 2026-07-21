@@ -15,11 +15,13 @@ import play.api.i18n.Messages
 import play.api.libs.typedmap.TypedEntry
 import play.api.libs.typedmap.TypedKey
 import play.api.libs.typedmap.TypedMap
+import play.api.mvc.request.ClientCertificateInfo
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.Scheme
 import play.api.mvc.request.TransportConnection
+import play.api.mvc.request.XForwardedClientCert
 import play.mvc.Http
 
 /**
@@ -81,19 +83,144 @@ trait Request[+A] extends RequestHeader {
 
   // Override the return type and default implementation of these RequestHeader methods
   override def withTransport(newTransport: TransportConnection): Request[A] =
-    new RequestImpl[A](remote, method, target, version, headers, attrs, body, newTransport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      newTransport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
+  override def withClientCertificate(newClientCertificate: Option[ClientCertificateInfo]): Request[A] =
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      newClientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
+  override def withXForwardedClientCertificates(
+      newXForwardedClientCertificates: Seq[XForwardedClientCert]
+  ): Request[A] = {
+    require(newXForwardedClientCertificates != null, "The XFCC assertion sequence must not be null")
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      newXForwardedClientCertificates.toVector
+    )
+  }
   override def withScheme(newScheme: Scheme): Request[A] =
-    new RequestImpl[A](remote, method, target, version, headers, attrs, body, transport, newScheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      newScheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def withAuthority(newAuthority: Option[RequestAuthority]): Request[A] =
-    new RequestImpl[A](remote, method, target, version, headers, attrs, body, transport, scheme, newAuthority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      newAuthority,
+      xForwardedClientCertificates
+    )
   override def withRemote(newRemote: RemoteInfo): Request[A] =
-    new RequestImpl[A](newRemote, method, target, version, headers, attrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      newRemote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def withMethod(newMethod: String): Request[A] =
-    new RequestImpl[A](remote, newMethod, target, version, headers, attrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      newMethod,
+      target,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def withTarget(newTarget: RequestTarget): Request[A] =
-    new RequestImpl[A](remote, method, newTarget, version, headers, attrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      newTarget,
+      version,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def withVersion(newVersion: String): Request[A] =
-    new RequestImpl[A](remote, method, target, newVersion, headers, attrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      newVersion,
+      headers,
+      attrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def withHeaders(newHeaders: Headers): Request[A] =
     new RequestImpl[A](
       remote,
@@ -104,11 +231,26 @@ trait Request[+A] extends RequestHeader {
       attrs,
       body,
       transport,
+      clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
   override def withAttrs(newAttrs: TypedMap): Request[A] =
-    new RequestImpl[A](remote, method, target, version, headers, newAttrs, body, transport, scheme, authority)
+    new RequestImpl[A](
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      newAttrs,
+      body,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   override def addAttr[B](key: TypedKey[B], value: B): Request[A] =
     withAttrs(attrs.updated(key, value))
   override def addAttrs(e1: TypedEntry[?]): Request[A]                                       = withAttrs(attrs.updated(e1))
@@ -171,8 +313,18 @@ private[play] class RequestImpl[+A](
     override val attrs: TypedMap,
     override val body: A,
     override val transport: TransportConnection,
+    override val clientCertificate: Option[ClientCertificateInfo],
     override val scheme: Scheme,
-    override val authority: Option[RequestAuthority]
+    override val authority: Option[RequestAuthority],
+    override val xForwardedClientCertificates: Vector[XForwardedClientCert] = Vector.empty
 ) extends Request[A] {
+  require(
+    clientCertificate != null && clientCertificate.forall(_ != null),
+    "Effective client certificate option must not be null or contain null"
+  )
+  require(
+    xForwardedClientCertificates != null && xForwardedClientCertificates.forall(_ != null),
+    "The XFCC assertion sequence must not be null or contain null"
+  )
   override val headers: Headers = RequestHeader.canonicalHeaders(requestHeaders, authority)
 }

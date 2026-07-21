@@ -21,6 +21,8 @@ trait RequestFactory {
    */
   def createRequestHeader(
       transport: TransportConnection,
+      clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -39,6 +41,8 @@ trait RequestFactory {
   def copyRequestHeader(rh: RequestHeader): RequestHeader = {
     createRequestHeader(
       rh.transport,
+      rh.clientCertificate,
+      rh.xForwardedClientCertificates,
       rh.remote,
       rh.scheme,
       rh.authority,
@@ -56,6 +60,8 @@ trait RequestFactory {
    */
   def createRequest[A](
       transport: TransportConnection,
+      clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -66,7 +72,19 @@ trait RequestFactory {
       attrs: TypedMap,
       body: A
   ): Request[A] =
-    createRequestHeader(transport, remote, scheme, authority, method, target, version, headers, attrs).withBody(
+    createRequestHeader(
+      transport,
+      clientCertificate,
+      xForwardedClientCertificates,
+      remote,
+      scheme,
+      authority,
+      method,
+      target,
+      version,
+      headers,
+      attrs
+    ).withBody(
       body
     )
 
@@ -78,6 +96,8 @@ trait RequestFactory {
   def copyRequest[A](r: Request[A]): Request[A] = {
     createRequest[A](
       r.transport,
+      r.clientCertificate,
+      r.xForwardedClientCertificates,
       r.remote,
       r.scheme,
       r.authority,
@@ -100,6 +120,8 @@ object RequestFactory {
   val plain = new RequestFactory {
     override def createRequestHeader(
         transport: TransportConnection,
+        clientCertificate: Option[ClientCertificateInfo],
+        xForwardedClientCertificates: Vector[XForwardedClientCert],
         remote: RemoteInfo,
         scheme: Scheme,
         authority: Option[RequestAuthority],
@@ -109,7 +131,19 @@ object RequestFactory {
         headers: Headers,
         attrs: TypedMap
     ): RequestHeader =
-      new RequestHeaderImpl(remote, method, target, version, headers, attrs, transport, scheme, authority)
+      new RequestHeaderImpl(
+        remote,
+        method,
+        target,
+        version,
+        headers,
+        attrs,
+        transport,
+        clientCertificate,
+        scheme,
+        authority,
+        xForwardedClientCertificates
+      )
   }
 }
 
@@ -134,6 +168,8 @@ class DefaultRequestFactory @Inject() (
 
   override def createRequestHeader(
       transport: TransportConnection,
+      clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -165,6 +201,18 @@ class DefaultRequestFactory @Inject() (
       RequestAttrKey.Session -> sessionCell,
       RequestAttrKey.Flash   -> flashCell
     )
-    new RequestHeaderImpl(remote, method, target, version, headers, updatedAttrMap, transport, scheme, authority)
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      updatedAttrMap,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      xForwardedClientCertificates
+    )
   }
 }

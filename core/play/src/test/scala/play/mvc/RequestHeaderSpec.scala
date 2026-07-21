@@ -35,6 +35,8 @@ class RequestHeaderSpec extends Specification {
     val scalaHeaders = Headers(headers*)
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       transport = transport,
+      clientCertificate = None,
+      xForwardedClientCertificates = Vector.empty,
       remote = remote,
       scheme = Scheme.Http,
       authority = RequestHeader

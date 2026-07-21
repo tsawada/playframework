@@ -601,3 +601,125 @@ Play accepts exactly one non-empty, non-negative decimal URI port and preserves 
 The effective `Host` header, Scala and Java request APIs, request-aware absolute and WebSocket URL generation, and the allowed hosts filter all observe the resulting authority. When trusted `X-Forwarded-Host` is also available, the port replaces any port in that forwarded authority. The HTTPS redirect filter continues to select its destination port from `play.filters.https.port`; an incoming destination port is not necessarily the correct HTTPS redirect port.
 
 Only enable this setting when the trusted proxy removes or overwrites any incoming client-supplied `X-Forwarded-Port` header before setting the correct value. Otherwise, clients may be able to spoof the effective request authority.
+
+### Forwarded client certificates
+
+A reverse proxy that terminates mutually authenticated TLS can forward the certificate presented by the original client to Play. This has a separate trust boundary and configuration from the remote address, scheme, and authority forwarding described above.
+
+Play exposes three deliberately different views of certificate information:
+
+* `request.transport.tls.map(_.peerCertificates)` is physical transport metadata. It contains the certificate sequence observed on the TLS connection that terminates at Play. Behind a TLS proxy this is the proxy's certificate sequence, not the original client's.
+* `request.clientCertificate` is the effective client certificate selected for application use. Its `certificate` is the leaf, its `chain` contains the remaining effective chain certificates in leaf-to-root order without repeating the leaf, and its `source` is `DirectTransport`, `Rfc9440`, or `XForwardedClientCert`.
+* `request.xForwardedClientCertificates` is the ordered sequence of accepted `X-Forwarded-Client-Cert` assertions. An assertion can contain `By`, `Hash`, `Subject`, `URI`, and `DNS` metadata without containing a certificate, so this sequence can be non-empty while `request.clientCertificate` is empty.
+
+The corresponding Java accessors are `request.transport()`, `request.clientCertificate()`, and `request.xForwardedClientCertificates()`.
+
+All three accessors are available in every mode. `request.clientCertificate` is the common effective-certificate API; inspect its `source` when the application needs to distinguish direct TLS from either forwarding protocol:
+
+| Mode and direct-peer trust | `request.clientCertificate` | `request.xForwardedClientCertificates` | `request.transport.tls` |
+| --- | --- | --- | --- |
+| `off`, or peer not trusted | Direct TLS leaf and chain with source `DirectTransport`, or empty | Empty | Direct TLS metadata, if present |
+| `rfc9440` with trusted peer | `Client-Cert` leaf and `Client-Cert-Chain` with source `Rfc9440`, or empty | Empty | Direct proxy-to-Play TLS metadata, if present |
+| `x-forwarded-client-cert` with trusted peer | Certificate from the accepted XFCC assertion with source `XForwardedClientCert`, or empty | Accepted XFCC assertion, including metadata-only assertions | Direct proxy-to-Play TLS metadata, if present |
+
+For example, Scala applications can consume the selected certificate independently of its source while retaining access to the physical connection:
+
+```scala
+request.clientCertificate.foreach { info =>
+  val leafAndChain = info.certificates
+  val source = info.source
+}
+
+val directPeerCertificates =
+  request.transport.tls.toSeq.flatMap(_.peerCertificates)
+```
+
+The equivalent Java APIs are:
+
+```java
+request.clientCertificate().ifPresent(info -> {
+  List<X509Certificate> leafAndChain = info.certificates();
+  Http.ClientCertificateSource source = info.source();
+});
+
+List<X509Certificate> directPeerCertificates =
+    request.transport().tls()
+        .map(Http.TransportTls::peerCertificates)
+        .orElseGet(List::of);
+```
+
+Forwarded client certificates are disabled by default. Configure one of the two supported protocols and a dedicated set of directly connected trusted proxies:
+
+```hocon
+play.http.forwarded.clientCertificates {
+  # off, rfc9440, or x-forwarded-client-cert
+  mode = "rfc9440"
+
+  # Independent from play.http.forwarded.trustedProxies
+  trustedProxies = ["10.0.0.0/24", "2001:db8:1234::/48"]
+
+  limits {
+    maxHeaderBytes = 64k
+    maxDecodedBytes = 64k
+    maxCertificateBytes = 16k
+    maxChainLength = 8
+  }
+
+  xForwardedClientCert {
+    policy = "sanitized-single"
+    format = "text"
+  }
+}
+```
+
+The limits bound the aggregate encoded header size, aggregate decoded certificate data, each decoded certificate, and the number of chain certificates excluding the leaf, respectively. These are application-level parser limits and do not increase the HTTP server's header-size limit.
+
+In `off` mode, or when the directly connected peer is not in `clientCertificates.trustedProxies`, Play does not interpret forwarded certificate fields. The original `Client-Cert`, `Client-Cert-Chain`, and `X-Forwarded-Client-Cert` fields remain available through `request.headers`, but the typed forwarded-certificate APIs ignore them. A certificate observed directly by Play remains available through `request.transport.tls` and is selected in `request.clientCertificate` with the `DirectTransport` source.
+
+When a trusted proxy and a forwarded-certificate mode are configured, the selected protocol describes the original client rather than the proxy-to-Play connection. If the trusted proxy supplies no client-certificate assertion, `request.clientCertificate` is empty; Play does not misidentify the proxy's own transport certificate as the original client's certificate. `request.transport.tls` still retains that physical connection information.
+
+#### RFC 9440 Client-Cert
+
+Set `mode = "rfc9440"` for the standardized [`Client-Cert` and `Client-Cert-Chain` fields](https://www.rfc-editor.org/rfc/rfc9440.html). `Client-Cert` contains exactly one DER X.509 end-entity certificate encoded as an RFC 8941 Byte Sequence. The optional `Client-Cert-Chain` is a list of Byte Sequences in TLS order, excludes the leaf, and may include the trust anchor:
+
+```http
+Client-Cert: :<base64-DER-leaf>:
+Client-Cert-Chain: :<base64-DER-chain-certificate-1>:, :<base64-DER-chain-certificate-2>:
+```
+
+Play exposes the result through `request.clientCertificate` with the `Rfc9440` source. `Client-Cert` is a singleton; `Client-Cert-Chain` can be split across repeated fields as permitted by RFC 9440. Syntactically valid Structured Fields parameters on either certificate item are accepted for forward compatibility and ignored.
+
+Following RFC 8941, Play treats a field that fails Structured Fields parsing as absent. A duplicated or malformed `Client-Cert`, including invalid Base64, DER, or trailing certificate data, therefore produces no effective client certificate. `Client-Cert-Chain` is handled independently: if its syntax or certificate data is invalid, Play ignores the chain but retains a valid `Client-Cert` leaf. A chain without a valid leaf has no effect. Exceeding a configured parser limit still rejects the request with HTTP 400.
+
+#### X-Forwarded-Client-Cert
+
+Set `mode = "x-forwarded-client-cert"` for the [Envoy-compatible text form](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers.html#x-forwarded-client-cert) of `X-Forwarded-Client-Cert` (XFCC). The currently supported `sanitized-single` policy accepts no field or exactly one physical field containing exactly one assertion; it does not accept repeated fields or an appended comma-separated multi-proxy history. The trusted proxy must therefore replace the field rather than append to it. With Envoy, use its `SANITIZE_SET` behavior. `format = "text"` selects the semicolon-delimited `Key=Value` representation; JSON and other vendor-specific encodings are not accepted.
+
+This requires explicit attention in multi-proxy service meshes. [Istio ingress gateways default to `SANITIZE_SET`, while sidecars default to `APPEND_FORWARD`](https://istio.io/latest/docs/ops/configuration/traffic-management/network-topologies/#configuring-x-forwarded-client-cert-headers). A sidecar can therefore append a workload assertion to the ingress assertion and produce a multi-entry history that Play rejects. Configure the proxy chain so the proxy directly connected to Play delivers exactly one assertion sanitized by a trusted component; Play does not guess an effective client certificate from an appended history.
+
+Play recognizes repeatable `By`, `URI`, and `DNS` values and singleton `Hash`, `Cert`, `Chain`, and `Subject` values. Their order is retained in `request.xForwardedClientCertificates`. An assertion containing only identity metadata, for example a SPIFFE `URI`, is valid and does not invent an X.509 certificate. When present, `Hash` is the hexadecimal SHA-256 digest of the leaf certificate.
+
+Envoy's text form emits `By` and `URI` values without escaping its comma and semicolon delimiters. Those characters therefore cannot be recovered unambiguously: identities used with this mode must not contain raw `,` or `;` in `By` or URI SAN values. Percent-encode them when issuing URI identities. An empty `URI=` marker, which Envoy emits when URI forwarding is enabled but the certificate has no URI SAN, is accepted without adding an empty identity.
+
+`Cert` is a percent-encoded PEM leaf certificate. Envoy's `Chain` value is a percent-encoded PEM sequence that includes the leaf; Play normalizes it so both `XForwardedClientCert.chain` and `ClientCertificateInfo.chain` contain only the remaining chain certificates. This is the chain presented by the client and is not necessarily the chain that the proxy validated. If both `Cert` and `Chain` are present, their leaf certificates must match. When either value supplies a certificate, `request.clientCertificate` uses the `XForwardedClientCert` source. The accepted assertion remains available separately so applications can inspect its other metadata.
+
+Malformed XFCC input from a configured, trusted proxy is rejected with HTTP 400 rather than being partly accepted. Exceeding a configured parser limit in either forwarded-certificate mode also rejects the request. Input from an untrusted peer is ignored by the typed APIs without being parsed. These rules apply independently of `play.http.forwarded.version`, which selects only remote address, scheme, and authority forwarding.
+
+#### Certificate trust and deployment requirements
+
+Parsing a forwarded certificate proves only that the field has the expected syntax and contains a parseable X.509 object. Play does not perform PKIX path validation, check certificate validity or revocation, prove possession of the private key, map a certificate to an application principal, or authorize the request. An XFCC hash consistency check likewise does not authenticate the assertion. The TLS-terminating proxy must authenticate the client certificate according to deployment policy, and the application must perform any required identity mapping and authorization.
+
+Before enabling either mode, enforce all of the following:
+
+* Prevent clients from connecting directly to Play, so they cannot bypass the proxy and supply certificate fields themselves.
+* On every request, have the trusted edge remove all incoming `Client-Cert`, `Client-Cert-Chain`, and `X-Forwarded-Client-Cert` fields before setting the one configured representation. It must also remove them when client-certificate authentication did not occur.
+* Protect and authenticate the proxy-to-Play path with mutually authenticated TLS or equivalently strong network isolation. An IP address in `trustedProxies` does not itself protect the assertion from interception, modification, or source-address impersonation.
+* Put only the proxy addresses that are authoritative for client-certificate assertions in `clientCertificates.trustedProxies`; do not copy a broader forwarding trust range without reviewing it.
+
+Certificate fields can exceed Play's default `play.server.max-header-size` of `8k`, especially when a chain is included. Increase that server setting when required, while keeping the client-certificate parser limits as small as the deployment permits:
+
+```hocon
+play.server.max-header-size = 64k
+```
+
+Finally, do not let a shared cache reuse certificate-dependent content across clients. When `Client-Cert` influences the response, RFC 9440 requires either an uncacheable response such as `Cache-Control: no-store` or `Vary: Client-Cert`; it also recommends that the TLS-terminating proxy turn that `Vary` value into `*` before returning the response to the user agent. `Cache-Control: no-store` is the safest default for certificate-dependent responses, including those based on XFCC metadata. Play does not add these response fields automatically.

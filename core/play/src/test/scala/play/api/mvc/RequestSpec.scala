@@ -150,6 +150,8 @@ class RequestSpec extends Specification {
       .fold(error => throw new IllegalArgumentException(error), identity)
     new DefaultRequestFactory(HttpConfiguration()).createRequest(
       transport = transport,
+      clientCertificate = None,
+      xForwardedClientCertificates = Vector.empty,
       remote = remote,
       scheme = RequestHeader.initialScheme(transport),
       authority = authority,

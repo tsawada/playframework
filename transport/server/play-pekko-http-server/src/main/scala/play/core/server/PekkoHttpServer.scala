@@ -201,13 +201,19 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
    */
   private val reloadCache = new ReloadCache[ReloadCacheValues] {
     protected override def reloadValue(tryApp: Try[Application]): ReloadCacheValues = {
-      val serverResultUtils          = reloadServerResultUtils(tryApp)
-      val forwardedHeaderHandler     = reloadForwardedHeaderHandler(tryApp)
-      val illegalResponseHeaderValue = ParserSettings.IllegalResponseHeaderValueProcessingMode(
+      val serverResultUtils              = reloadServerResultUtils(tryApp)
+      val forwardedHeaderHandler         = reloadForwardedHeaderHandler(tryApp)
+      val clientCertificateHeaderHandler = reloadClientCertificateHeaderHandler(tryApp)
+      val illegalResponseHeaderValue     = ParserSettings.IllegalResponseHeaderValueProcessingMode(
         illegalResponseHeaderValueProcessingMode
       )
       val modelConversion =
-        new PekkoModelConversion(serverResultUtils, forwardedHeaderHandler, illegalResponseHeaderValue)
+        new PekkoModelConversion(
+          serverResultUtils,
+          forwardedHeaderHandler,
+          clientCertificateHeaderHandler,
+          illegalResponseHeaderValue
+        )
       ReloadCacheValues(
         resultUtils = serverResultUtils,
         modelConversion = modelConversion,
@@ -266,12 +272,13 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       try {
         ConnectionContext.httpsServer(() => {
           val engine = sslContext.createSSLEngine()
+          engine.setUseClientMode(false)
           createClientAuth() match {
             case Some(auth) if auth == TLSClientAuth.need =>
               engine.setNeedClientAuth(true)
             case Some(auth) if auth == TLSClientAuth.want =>
               engine.setWantClientAuth(true)
-            case _ => engine.setUseClientMode(false)
+            case _ => ()
           }
           engine
         })
@@ -347,11 +354,12 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       ServerDebugInfo.attachToRequestHeader(rh, debugInfo)
     }
 
-    def clientError(statusCode: Int, message: String): (RequestHeader, Handler) = {
+    def clientError(statusCode: Int, message: String, requestFailure: Throwable): (RequestHeader, Handler) = {
       val headers        = modelConversion(tryApp).convertRequestHeadersPekko(decodedRequest)
       val unparsedTarget = Server.createUnparsedRequestTarget(headers.uri)
       val requestHeader  =
-        modelConversion(tryApp).createErrorRequestHeader(headers, secure, remoteAddress, unparsedTarget, request)
+        modelConversion(tryApp)
+          .createErrorRequestHeader(headers, secure, remoteAddress, unparsedTarget, request, requestFailure)
       val debugHeader   = attachDebugInfo(requestHeader)
       val maybeEnriched = Server.tryToEnrichHeader(tryApp, debugHeader)
       val result        = errorHandler(tryApp).onClientError(
@@ -365,7 +373,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
 
     val (taggedRequestHeader, handler): (RequestHeader, Handler) = convertedRequestHeader match {
       case Failure(exception) =>
-        clientError(Status.BAD_REQUEST, exception.getMessage)
+        clientError(Status.BAD_REQUEST, exception.getMessage, exception)
       case Success(untagged) =>
         val debugHeader = attachDebugInfo(untagged)
         Server.getHandlerFor(debugHeader, tryApp, fallbackErrorHandler)

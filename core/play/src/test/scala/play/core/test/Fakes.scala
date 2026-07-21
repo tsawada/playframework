@@ -37,21 +37,29 @@ case class FakeHeaders(data: Seq[(String, String)] = Seq.empty) extends Headers(
  * @tparam A the body content type.
  */
 class FakeRequest[+A](request: Request[A]) extends Request[A] {
-  override def transport: TransportConnection      = request.transport
-  override def remote: RemoteInfo                  = request.remote
-  override def scheme: Scheme                      = request.scheme
-  override def authority: Option[RequestAuthority] = request.authority
-  override def method: String                      = request.method
-  override def target: RequestTarget               = request.target
-  override def version: String                     = request.version
-  override def headers: Headers                    = request.headers
-  override def body: A                             = request.body
-  override def attrs: TypedMap                     = request.attrs
+  override def transport: TransportConnection                             = request.transport
+  override def clientCertificate: Option[ClientCertificateInfo]           = request.clientCertificate
+  override def xForwardedClientCertificates: Vector[XForwardedClientCert] = request.xForwardedClientCertificates
+  override def remote: RemoteInfo                                         = request.remote
+  override def scheme: Scheme                                             = request.scheme
+  override def authority: Option[RequestAuthority]                        = request.authority
+  override def method: String                                             = request.method
+  override def target: RequestTarget                                      = request.target
+  override def version: String                                            = request.version
+  override def headers: Headers                                           = request.headers
+  override def body: A                                                    = request.body
+  override def attrs: TypedMap                                            = request.attrs
 
   override def withRemote(newRemote: RemoteInfo): FakeRequest[A] =
     new FakeRequest(request.withRemote(newRemote))
   override def withTransport(newTransport: TransportConnection): FakeRequest[A] =
     new FakeRequest(request.withTransport(newTransport))
+  override def withClientCertificate(newClientCertificate: Option[ClientCertificateInfo]): FakeRequest[A] =
+    new FakeRequest(request.withClientCertificate(newClientCertificate))
+  override def withXForwardedClientCertificates(
+      newXForwardedClientCertificates: Seq[XForwardedClientCert]
+  ): FakeRequest[A] =
+    new FakeRequest(request.withXForwardedClientCertificates(newXForwardedClientCertificates))
   override def withScheme(newScheme: Scheme): FakeRequest[A] =
     new FakeRequest(request.withScheme(newScheme))
   override def withAuthority(newAuthority: Option[RequestAuthority]): FakeRequest[A] =
@@ -217,7 +225,9 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
       scheme: Scheme = Scheme.Http,
       version: String = "HTTP/1.1",
       id: Long = 666,
-      attrs: TypedMap = TypedMap.empty
+      attrs: TypedMap = TypedMap.empty,
+      clientCertificate: Option[ClientCertificateInfo] = None,
+      xForwardedClientCertificates: Vector[XForwardedClientCert] = Vector.empty
   ): FakeRequest[A] = {
     val _uri   = uri
     val target = new RequestTarget {
@@ -231,6 +241,8 @@ class FakeRequestFactory(requestFactory: RequestFactory) {
       .fold(error => throw new IllegalArgumentException(error), identity)
     val request: Request[A] = requestFactory.createRequest(
       transport,
+      clientCertificate,
+      xForwardedClientCertificates,
       remote,
       scheme,
       authority,

@@ -232,6 +232,123 @@ public class Http {
     }
   }
 
+  /** The source from which Play selected an effective client certificate. */
+  public enum ClientCertificateSource {
+    /** The certificate was observed on the TLS connection directly terminating at Play. */
+    DIRECT_TRANSPORT,
+
+    /** The certificate was accepted from the RFC 9440 {@code Client-Cert} header fields. */
+    RFC_9440,
+
+    /** The certificate was accepted from {@code X-Forwarded-Client-Cert}. */
+    X_FORWARDED_CLIENT_CERT;
+
+    /**
+     * @return the Scala version of this client certificate source
+     */
+    public play.api.mvc.request.ClientCertificateSource asScala() {
+      return switch (this) {
+        case DIRECT_TRANSPORT ->
+            play.api.mvc.request.ClientCertificateSource$.MODULE$.directTransport();
+        case RFC_9440 -> play.api.mvc.request.ClientCertificateSource$.MODULE$.rfc9440();
+        case X_FORWARDED_CLIENT_CERT ->
+            play.api.mvc.request.ClientCertificateSource$.MODULE$.xForwardedClientCert();
+      };
+    }
+  }
+
+  /** The effective X.509 client certificate selected for a request. */
+  public record ClientCertificateInfo(
+      X509Certificate certificate, List<X509Certificate> chain, ClientCertificateSource source) {
+
+    public ClientCertificateInfo {
+      Objects.requireNonNull(certificate, "certificate");
+      chain = List.copyOf(chain);
+      Objects.requireNonNull(source, "source");
+      if (chain.contains(certificate)) {
+        throw new IllegalArgumentException(
+            "An effective client certificate chain must not repeat the leaf certificate");
+      }
+    }
+
+    /**
+     * Return the effective leaf-and-chain sequence, with the leaf first.
+     *
+     * @return the immutable leaf-and-chain sequence
+     */
+    public List<X509Certificate> certificates() {
+      ArrayList<X509Certificate> certificates = new ArrayList<>(chain.size() + 1);
+      certificates.add(certificate);
+      certificates.addAll(chain);
+      return List.copyOf(certificates);
+    }
+
+    /**
+     * @return the Scala version of this effective client certificate information
+     */
+    public play.api.mvc.request.ClientCertificateInfo asScala() {
+      return play.api.mvc.request.ClientCertificateInfo$.MODULE$.create(
+          certificate, Scala.asScala(chain), source.asScala());
+    }
+  }
+
+  /** One accepted {@code X-Forwarded-Client-Cert} assertion. */
+  public record XForwardedClientCert(
+      List<String> by,
+      Optional<String> hash,
+      Optional<X509Certificate> certificate,
+      List<X509Certificate> chain,
+      Optional<String> subject,
+      List<String> uris,
+      List<String> dnsNames) {
+
+    public XForwardedClientCert {
+      by = List.copyOf(by);
+      Objects.requireNonNull(hash, "hash");
+      Objects.requireNonNull(certificate, "certificate");
+      chain = List.copyOf(chain);
+      Objects.requireNonNull(subject, "subject");
+      uris = List.copyOf(uris);
+      dnsNames = List.copyOf(dnsNames);
+      if (certificate.isEmpty() && !chain.isEmpty()) {
+        throw new IllegalArgumentException("An XFCC certificate chain requires a leaf certificate");
+      }
+      if (certificate.isPresent() && chain.contains(certificate.orElseThrow())) {
+        throw new IllegalArgumentException(
+            "An XFCC certificate chain must not repeat the leaf certificate");
+      }
+    }
+
+    /**
+     * Return the asserted leaf-and-chain sequence.
+     *
+     * @return the immutable sequence, or an empty list when no certificate was asserted
+     */
+    public List<X509Certificate> certificates() {
+      if (certificate.isEmpty()) {
+        return List.of();
+      }
+      ArrayList<X509Certificate> certificates = new ArrayList<>(chain.size() + 1);
+      certificates.add(certificate.orElseThrow());
+      certificates.addAll(chain);
+      return List.copyOf(certificates);
+    }
+
+    /**
+     * @return the Scala version of this XFCC assertion
+     */
+    public play.api.mvc.request.XForwardedClientCert asScala() {
+      return play.api.mvc.request.XForwardedClientCert$.MODULE$.create(
+          Scala.asScala(by),
+          OptionConverters.toScala(hash),
+          OptionConverters.toScala(certificate),
+          Scala.asScala(chain),
+          OptionConverters.toScala(subject),
+          Scala.asScala(uris),
+          Scala.asScala(dnsNames));
+    }
+  }
+
   /** Immutable metadata about the transport connection directly terminating at Play. */
   public record TransportConnection(PeerEndpoint peer, Optional<TransportTls> tls) {
     public TransportConnection {
@@ -728,6 +845,25 @@ public class Http {
     }
 
     /**
+     * @return the effective X.509 client certificate selected for this request, if present
+     */
+    default Optional<ClientCertificateInfo> clientCertificate() {
+      return OptionConverters.toJava(asScala().clientCertificate()).map(value -> value.asJava());
+    }
+
+    /**
+     * Return accepted {@code X-Forwarded-Client-Cert} assertions in client-to-Play order.
+     *
+     * @return the immutable ordered assertions
+     */
+    default List<XForwardedClientCert> xForwardedClientCertificates() {
+      return List.copyOf(
+          Scala.asJava(asScala().xForwardedClientCertificates()).stream()
+              .map(value -> value.asJava())
+              .toList());
+    }
+
+    /**
      * @return the normalized effective request scheme
      */
     default Scheme scheme() {
@@ -1178,6 +1314,8 @@ public class Http {
       req =
           requestFactory.createRequest(
               transport,
+              OptionConverters.toScala(Optional.empty()),
+              scala.collection.immutable.Vector$.MODULE$.empty(),
               remote,
               play.api.mvc.request.Scheme$.MODULE$.Http(),
               OptionConverters.toScala(Optional.empty()),
@@ -1965,6 +2103,56 @@ public class Http {
      */
     public RequestBuilder transport(TransportConnection transport) {
       req = req.withTransport(transport.asScala());
+      return this;
+    }
+
+    /**
+     * @return the effective X.509 client certificate selected for this request, if present
+     */
+    public Optional<ClientCertificateInfo> clientCertificate() {
+      return OptionConverters.toJava(req.clientCertificate()).map(value -> value.asJava());
+    }
+
+    /**
+     * @param clientCertificate sets the effective client certificate, or empty to remove it
+     * @return the builder instance
+     */
+    public RequestBuilder clientCertificate(Optional<ClientCertificateInfo> clientCertificate) {
+      Objects.requireNonNull(clientCertificate, "clientCertificate");
+      req =
+          req.withClientCertificate(
+              OptionConverters.toScala(clientCertificate.map(ClientCertificateInfo::asScala)));
+      return this;
+    }
+
+    /**
+     * @param clientCertificate sets the effective client certificate
+     * @return the builder instance
+     */
+    public RequestBuilder clientCertificate(ClientCertificateInfo clientCertificate) {
+      return clientCertificate(Optional.of(clientCertificate));
+    }
+
+    /**
+     * @return accepted {@code X-Forwarded-Client-Cert} assertions in client-to-Play order
+     */
+    public List<XForwardedClientCert> xForwardedClientCertificates() {
+      return List.copyOf(
+          Scala.asJava(req.xForwardedClientCertificates()).stream()
+              .map(value -> value.asJava())
+              .toList());
+    }
+
+    /**
+     * @param xForwardedClientCertificates sets the ordered accepted XFCC assertions
+     * @return the builder instance
+     */
+    public RequestBuilder xForwardedClientCertificates(
+        List<XForwardedClientCert> xForwardedClientCertificates) {
+      Objects.requireNonNull(xForwardedClientCertificates, "xForwardedClientCertificates");
+      List<play.api.mvc.request.XForwardedClientCert> scalaValues =
+          xForwardedClientCertificates.stream().map(XForwardedClientCert::asScala).toList();
+      req = req.withXForwardedClientCertificates(Scala.toSeq(scalaValues));
       return this;
     }
 
@@ -3042,6 +3230,9 @@ public class Http {
     String VIA = "Via";
     String WARNING = "Warning";
     String WWW_AUTHENTICATE = "WWW-Authenticate";
+    String CLIENT_CERT = "Client-Cert";
+    String CLIENT_CERT_CHAIN = "Client-Cert-Chain";
+    String X_FORWARDED_CLIENT_CERT = "X-Forwarded-Client-Cert";
     String ACCESS_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
     String ACCESS_CONTROL_EXPOSE_HEADERS = "Access-Control-Expose-Headers";
     String ACCESS_CONTROL_MAX_AGE = "Access-Control-Max-Age";

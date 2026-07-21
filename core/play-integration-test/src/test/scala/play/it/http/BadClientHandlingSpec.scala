@@ -14,6 +14,8 @@ import play.api._
 import play.api.http.DefaultHttpErrorHandler
 import play.api.http.HttpErrorHandler
 import play.api.mvc._
+import play.api.mvc.request.ClientCertificateInfo
+import play.api.mvc.request.ClientCertificateSource
 import play.api.mvc.request.ForwardingInfo
 import play.api.mvc.request.ForwardingSource
 import play.api.mvc.request.RemoteEndpoint
@@ -29,6 +31,18 @@ class NettyBadClientHandlingSpec     extends BadClientHandlingSpec with NettyInt
 class PekkoHttpBadClientHandlingSpec extends BadClientHandlingSpec with PekkoHttpIntegrationSpecification
 
 trait BadClientHandlingSpec extends PlaySpecification with ServerIntegrationSpecification {
+  // RFC 9440 Appendix A's leaf certificate (serial number 7).
+  private val forwardedClientCertificateBase64 =
+    "MIIBqDCCAU6gAwIBAgIBBzAKBggqhkjOPQQDAjA6MRswGQYDVQQKDBJMZXQncyBB" +
+      "dXRoZW50aWNhdGUxGzAZBgNVBAMMEkxBIEludGVybWVkaWF0ZSBDQTAeFw0yMDAx" +
+      "MTQyMjU1MzNaFw0yMTAxMjMyMjU1MzNaMA0xCzAJBgNVBAMMAkJDMFkwEwYHKoZI" +
+      "zj0CAQYIKoZIzj0DAQcDQgAE8YnXXfaUgmnMtOXU/IncWalRhebrXmckC8vdgJ1p" +
+      "5Be5F/3YC8OthxM4+k1M6aEAEFcGzkJiNy6J84y7uzo9M6NyMHAwCQYDVR0TBAIw" +
+      "ADAfBgNVHSMEGDAWgBRm3WjLa38lbEYCuiCPct0ZaSED2DAOBgNVHQ8BAf8EBAMC" +
+      "BsAwEwYDVR0lBAwwCgYIKwYBBQUHAwIwHQYDVR0RAQH/BBMwEYEPYmRjQGV4YW1w" +
+      "bGUuY29tMAoGCCqGSM49BAMCA0gAMEUCIBHda/r1vaL6G3VliL4/Di6YK0Q6bMje" +
+      "SkC3dFCOOB8TAiEAx/kHSB4urmiZ0NX5r5XarmPk0wmuydBVoU4hBVZ1yhk="
+
   "Play" should {
     def withServer[T](
         errorHandler: HttpErrorHandler = DefaultHttpErrorHandler,
@@ -142,6 +156,99 @@ trait BadClientHandlingSpec extends PlaySpecification with ServerIntegrationSpec
 
       response.status must_== 400
       response.body must beLeft("203.0.113.43|https|true|public.example")
+    }
+
+    "preserve a trusted RFC 9440 client certificate in an error handler" in {
+      val seen = new AtomicReference[RequestHeader]()
+
+      withServer(
+        capturingErrorHandler(seen),
+        Map(
+          "play.http.forwarded.clientCertificates.mode"           -> "rfc9440",
+          "play.http.forwarded.clientCertificates.trustedProxies" -> java.util.List.of("127.0.0.0/8", "::1/128")
+        )
+      ) { port =>
+        val response = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/[",
+            "HTTP/1.1",
+            Map("Client-Cert" -> s":$forwardedClientCertificateBase64:"),
+            ""
+          )
+        )(0)
+
+        response.status must_== 400
+      }
+
+      val request = Option(seen.get()).getOrElse(throw new IllegalStateException("The error handler was not called"))
+
+      request.clientCertificate must beSome[ClientCertificateInfo].like {
+        case certificate =>
+          (certificate.source must_== ClientCertificateSource.Rfc9440)
+            .and(certificate.certificate.getSerialNumber.intValue must_== 7)
+      }
+      request.xForwardedClientCertificates must beEmpty
+    }
+
+    "preserve trusted XFCC assertion metadata in an error handler" in {
+      val seen = new AtomicReference[RequestHeader]()
+
+      withServer(
+        capturingErrorHandler(seen),
+        Map(
+          "play.http.forwarded.clientCertificates.mode"           -> "x-forwarded-client-cert",
+          "play.http.forwarded.clientCertificates.trustedProxies" ->
+            java.util.List.of("127.0.0.0/8", "::1/128")
+        )
+      ) { port =>
+        val response = BasicHttpClient.makeRequests(port)(
+          BasicRequest(
+            "GET",
+            "/[",
+            "HTTP/1.1",
+            Map(
+              "X-Forwarded-Client-Cert" ->
+                s"Hash=${"a" * 64};URI=spiffe://example.test/workload"
+            ),
+            ""
+          )
+        )(0)
+
+        response.status must_== 400
+      }
+
+      val request = Option(seen.get()).getOrElse(throw new IllegalStateException("The error handler was not called"))
+
+      request.clientCertificate must beNone
+      request.xForwardedClientCertificates must beLike {
+        case Vector(assertion) =>
+          (assertion.hash must beSome("a" * 64))
+            .and(assertion.uris must_== Vector("spiffe://example.test/workload"))
+      }
+    }
+
+    "omit malformed trusted client certificate metadata in an error handler" in {
+      val seen = new AtomicReference[RequestHeader]()
+
+      withServer(
+        capturingErrorHandler(seen),
+        Map(
+          "play.http.forwarded.clientCertificates.mode"           -> "rfc9440",
+          "play.http.forwarded.clientCertificates.trustedProxies" -> java.util.List.of("127.0.0.0/8", "::1/128")
+        )
+      ) { port =>
+        val response = BasicHttpClient.makeRequests(port)(
+          BasicRequest("GET", "/[", "HTTP/1.1", Map("Client-Cert" -> ":not base64:"), "")
+        )(0)
+
+        response.status must_== 400
+      }
+
+      val request = Option(seen.get()).getOrElse(throw new IllegalStateException("The error handler was not called"))
+
+      request.clientCertificate must beNone
+      request.xForwardedClientCertificates must beEmpty
     }
 
     "preserve the accepted forwarding path and provenance in an error handler" in {
