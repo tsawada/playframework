@@ -52,6 +52,7 @@ import play.api.mvc._
 import play.api.mvc.pekkohttp.PekkoHttpHandler
 import play.api.mvc.request.RequestAttrKey
 import play.api.routing.Router
+import play.core.server.common.ClientCertificateHeaderHandler.InvalidClientCertificateHeaderException
 import play.core.server.common.ReloadCache
 import play.core.server.common.ServerDebugInfo
 import play.core.server.common.ServerResultUtils
@@ -374,6 +375,9 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
     }
 
     val (taggedRequestHeader, handler): (RequestHeader, Handler) = convertedRequestHeader match {
+      case Failure(exception: InvalidClientCertificateHeaderException) =>
+        logger.debug("Rejected invalid forwarded client certificate metadata.", exception)
+        clientError(Status.BAD_REQUEST, "Invalid forwarded client certificate", exception)
       case Failure(exception) =>
         clientError(Status.BAD_REQUEST, exception.getMessage, exception)
       case Success(untagged) =>

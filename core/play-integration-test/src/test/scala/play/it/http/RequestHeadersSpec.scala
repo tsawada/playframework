@@ -643,6 +643,9 @@ trait RequestHeadersSpec extends PlaySpecification with ServerIntegrationSpecifi
         )
 
         response.status must_== BAD_REQUEST
+        val responseBody = response.body.left.toOption.get
+        responseBody must contain("Invalid forwarded client certificate")
+        responseBody must not contain "XFCC certificate contains an invalid percent escape"
       }
     }
 
