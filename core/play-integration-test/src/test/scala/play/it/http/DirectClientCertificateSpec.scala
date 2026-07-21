@@ -41,7 +41,9 @@ class DirectClientCertificateSpec
         selectedCertificates == transportCertificates
       }
 
-      Results.Ok(directCertificateMatchesTransport.contains(true).toString)
+      Results.Ok(
+        (directCertificateMatchesTransport.contains(true) && request.xForwardedClientCertificates.isEmpty).toString
+      )
     }
   }
 
