@@ -201,13 +201,19 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
    */
   private val reloadCache = new ReloadCache[ReloadCacheValues] {
     protected override def reloadValue(tryApp: Try[Application]): ReloadCacheValues = {
-      val serverResultUtils          = reloadServerResultUtils(tryApp)
-      val forwardedHeaderHandler     = reloadForwardedHeaderHandler(tryApp)
-      val illegalResponseHeaderValue = ParserSettings.IllegalResponseHeaderValueProcessingMode(
+      val serverResultUtils              = reloadServerResultUtils(tryApp)
+      val forwardedHeaderHandler         = reloadForwardedHeaderHandler(tryApp)
+      val clientCertificateHeaderHandler = reloadClientCertificateHeaderHandler(tryApp)
+      val illegalResponseHeaderValue     = ParserSettings.IllegalResponseHeaderValueProcessingMode(
         illegalResponseHeaderValueProcessingMode
       )
       val modelConversion =
-        new PekkoModelConversion(serverResultUtils, forwardedHeaderHandler, illegalResponseHeaderValue)
+        new PekkoModelConversion(
+          serverResultUtils,
+          forwardedHeaderHandler,
+          clientCertificateHeaderHandler,
+          illegalResponseHeaderValue
+        )
       ReloadCacheValues(
         resultUtils = serverResultUtils,
         modelConversion = modelConversion,

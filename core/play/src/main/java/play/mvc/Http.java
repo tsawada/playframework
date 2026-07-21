@@ -3137,6 +3137,8 @@ public class Http {
     String VIA = "Via";
     String WARNING = "Warning";
     String WWW_AUTHENTICATE = "WWW-Authenticate";
+    String CLIENT_CERT = "Client-Cert";
+    String CLIENT_CERT_CHAIN = "Client-Cert-Chain";
     String ACCESS_CONTROL_ALLOW_ORIGIN = "Access-Control-Allow-Origin";
     String ACCESS_CONTROL_EXPOSE_HEADERS = "Access-Control-Expose-Headers";
     String ACCESS_CONTROL_MAX_AGE = "Access-Control-Max-Age";

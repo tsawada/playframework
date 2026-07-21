@@ -35,6 +35,7 @@ import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.TransportConnection
 import play.api.mvc.request.TransportTls
 import play.api.Logger
+import play.core.server.common.ClientCertificateHeaderHandler
 import play.core.server.common.ForwardedHeaderHandler
 import play.core.server.common.PathAndQueryParser
 import play.core.server.common.ServerResultUtils
@@ -47,6 +48,7 @@ import play.mvc.Http.HeaderNames
 private[server] class PekkoModelConversion(
     resultUtils: ServerResultUtils,
     forwardedHeaderHandler: ForwardedHeaderHandler,
+    clientCertificateHeaderHandler: ClientCertificateHeaderHandler,
     illegalResponseHeaderValue: ParserSettings.IllegalResponseHeaderValueProcessingMode
 ) {
   private val logger = Logger(getClass)
@@ -91,8 +93,8 @@ private[server] class PekkoModelConversion(
       request: HttpRequest
   ): RequestHeader = {
     val transport         = createTransport(remoteAddress, secureProtocol, request)
-    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
     val rawRemote         = RemoteInfo.fromPeer(transport.peer)
+    val clientCertificate = clientCertificateHeaderHandler.clientCertificate(transport, headers)
     val directScheme      = RequestHeader.initialScheme(transport)
     val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name, requestTarget, request.protocol.value, headers)

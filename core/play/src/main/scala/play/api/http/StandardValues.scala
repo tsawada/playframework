@@ -305,6 +305,8 @@ trait HeaderNames {
   val WWW_AUTHENTICATE = "WWW-Authenticate"
 
   val FORWARDED         = "Forwarded"
+  val CLIENT_CERT       = "Client-Cert"
+  val CLIENT_CERT_CHAIN = "Client-Cert-Chain"
   val X_FORWARDED_FOR   = "X-Forwarded-For"
   val X_FORWARDED_HOST  = "X-Forwarded-Host"
   val X_FORWARDED_PORT  = "X-Forwarded-Port"

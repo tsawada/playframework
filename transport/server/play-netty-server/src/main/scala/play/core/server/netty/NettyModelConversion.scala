@@ -42,6 +42,7 @@ import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.TransportConnection
 import play.api.mvc.request.TransportTls
 import play.api.Logger
+import play.core.server.common.ClientCertificateHeaderHandler
 import play.core.server.common.ForwardedHeaderHandler
 import play.core.server.common.PathAndQueryParser
 import play.core.server.common.ServerResultUtils
@@ -50,6 +51,7 @@ import play.core.system.RequestIdProvider
 private[server] class NettyModelConversion(
     resultUtils: ServerResultUtils,
     forwardedHeaderHandler: ForwardedHeaderHandler,
+    clientCertificateHeaderHandler: ClientCertificateHeaderHandler,
     serverHeader: Option[String]
 ) {
   private val logger = Logger(classOf[NettyModelConversion])
@@ -120,9 +122,9 @@ private[server] class NettyModelConversion(
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
     val transport         = createTransport(channel)
-    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
     val rawRemote         = RemoteInfo.fromPeer(transport.peer)
     val rawHeaders        = new NettyHeadersWrapper(request.headers)
+    val clientCertificate = clientCertificateHeaderHandler.clientCertificate(transport, rawHeaders)
     val directScheme      = RequestHeader.initialScheme(transport)
     val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)

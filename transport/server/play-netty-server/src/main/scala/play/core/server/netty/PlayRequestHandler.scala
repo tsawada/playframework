@@ -72,9 +72,15 @@ private[play] class PlayRequestHandler(
    */
   private val reloadCache = new ReloadCache[ReloadCacheValues] {
     protected override def reloadValue(tryApp: Try[Application]): ReloadCacheValues = {
-      val serverResultUtils      = reloadServerResultUtils(tryApp)
-      val forwardedHeaderHandler = reloadForwardedHeaderHandler(tryApp)
-      val modelConversion        = new NettyModelConversion(serverResultUtils, forwardedHeaderHandler, serverHeader)
+      val serverResultUtils              = reloadServerResultUtils(tryApp)
+      val forwardedHeaderHandler         = reloadForwardedHeaderHandler(tryApp)
+      val clientCertificateHeaderHandler = reloadClientCertificateHeaderHandler(tryApp)
+      val modelConversion                = new NettyModelConversion(
+        serverResultUtils,
+        forwardedHeaderHandler,
+        clientCertificateHeaderHandler,
+        serverHeader
+      )
       ReloadCacheValues(
         resultUtils = serverResultUtils,
         modelConversion = modelConversion,
