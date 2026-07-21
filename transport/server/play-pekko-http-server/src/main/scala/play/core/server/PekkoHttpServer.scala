@@ -266,12 +266,13 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       try {
         ConnectionContext.httpsServer(() => {
           val engine = sslContext.createSSLEngine()
+          engine.setUseClientMode(false)
           createClientAuth() match {
             case Some(auth) if auth == TLSClientAuth.need =>
               engine.setNeedClientAuth(true)
             case Some(auth) if auth == TLSClientAuth.want =>
               engine.setWantClientAuth(true)
-            case _ => engine.setUseClientMode(false)
+            case _ => ()
           }
           engine
         })
