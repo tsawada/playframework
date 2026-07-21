@@ -256,8 +256,10 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
   }
 
   // Lazy since it will only be required when HTTPS is bound.
-  private lazy val sslContext: SSLContext =
-    ServerSSLEngine.createSSLEngineProvider(context.config, applicationProvider).sslContext()
+  private lazy val sslEngineProvider =
+    ServerSSLEngine.createSSLEngineProvider(context.config, applicationProvider)
+
+  private lazy val sslContext: SSLContext = sslEngineProvider.sslContext()
 
   private val httpServerBinding = context.config.port.map(port =>
     createServerBinding(
@@ -271,7 +273,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
     val connectionContext =
       try {
         ConnectionContext.httpsServer(() => {
-          val engine = sslContext.createSSLEngine()
+          val engine = sslEngineProvider.createSSLEngine()
           engine.setUseClientMode(false)
           createClientAuth() match {
             case Some(auth) if auth == TLSClientAuth.need =>
