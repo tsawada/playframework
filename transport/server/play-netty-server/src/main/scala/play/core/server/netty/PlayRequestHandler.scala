@@ -116,11 +116,19 @@ private[play] class PlayRequestHandler(
         statusCode: Int,
         message: String,
         convertedRequestHeader: Option[RequestHeader] = None,
+        requestFailure: Option[Throwable] = None,
         bypassErrorHandler: Boolean = false
     ): (RequestHeader, Handler) = {
       val requestHeader = convertedRequestHeader.getOrElse {
         val unparsedTarget = Server.createUnparsedRequestTarget(request.uri)
-        modelConversion(tryApp).createErrorRequestHeader(channel, request, unparsedTarget)
+        modelConversion(tryApp).createErrorRequestHeader(
+          channel,
+          request,
+          unparsedTarget,
+          requestFailure.getOrElse {
+            throw new IllegalStateException("Request conversion failure is required to construct an error request")
+          }
+        )
       }
       val debugHeader   = attachDebugInfo(requestHeader)
       val cleanMessage  = if (message == null) "" else message
@@ -139,10 +147,17 @@ private[play] class PlayRequestHandler(
 
     val (requestHeader, handler): (RequestHeader, Handler) = tryRequest match {
       case Failure(exception: IllegalArgumentException) if exception.getMessage.startsWith("invalid hex byte") =>
-        clientError(Status.BAD_REQUEST, exception.getMessage, bypassErrorHandler = true)
-      case Failure(exception: TooLongFrameException) => clientError(Status.REQUEST_URI_TOO_LONG, exception.getMessage)
-      case Failure(exception)                        => clientError(Status.BAD_REQUEST, exception.getMessage)
-      case Success(untagged)                         =>
+        clientError(
+          Status.BAD_REQUEST,
+          exception.getMessage,
+          requestFailure = Some(exception),
+          bypassErrorHandler = true
+        )
+      case Failure(exception: TooLongFrameException) =>
+        clientError(Status.REQUEST_URI_TOO_LONG, exception.getMessage, requestFailure = Some(exception))
+      case Failure(exception) =>
+        clientError(Status.BAD_REQUEST, exception.getMessage, requestFailure = Some(exception))
+      case Success(untagged) =>
         if (
           untagged.headers
             .get(HeaderNames.CONTENT_LENGTH)

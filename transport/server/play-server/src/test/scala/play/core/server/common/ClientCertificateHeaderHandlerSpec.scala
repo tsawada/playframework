@@ -43,7 +43,21 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
       "bGUuY29tMAoGCCqGSM49BAMCA0gAMEUCIBHda/r1vaL6G3VliL4/Di6YK0Q6bMje" +
       "SkC3dFCOOB8TAiEAx/kHSB4urmiZ0NX5r5XarmPk0wmuydBVoU4hBVZ1yhk="
 
-  private val leaf = certificate(leafBase64)
+  private val intermediateBase64 =
+    "MIIB5jCCAYugAwIBAgIBFjAKBggqhkjOPQQDAjBWMQswCQYDVQQGEwJVUzEbMBkG" +
+      "A1UECgwSTGV0J3MgQXV0aGVudGljYXRlMSowKAYDVQQDDCFMZXQncyBBdXRoZW50" +
+      "aWNhdGUgUm9vdCBBdXRob3JpdHkwHhcNMjAwMTE0MjEzMjMwWhcNMzAwMTExMjEz" +
+      "MjMwWjA6MRswGQYDVQQKDBJMZXQncyBBdXRoZW50aWNhdGUxGzAZBgNVBAMMEkxB" +
+      "IEludGVybWVkaWF0ZSBDQTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABJf+aA54" +
+      "RC5pyLAR5yfXVYmNpgd+CGUTDp2KOGhc0gK91zxhHesEYkdXkpS2UN8Kati+yHtW" +
+      "CV3kkhCngGyv7RqjZjBkMB0GA1UdDgQWBBRm3WjLa38lbEYCuiCPct0ZaSED2DAf" +
+      "BgNVHSMEGDAWgBTEA2Q6eecKu9g9yb5glbkhhVINGDASBgNVHRMBAf8ECDAGAQH/" +
+      "AgEAMA4GA1UdDwEB/wQEAwIBhjAKBggqhkjOPQQDAgNJADBGAiEA5pLvaFwRRkxo" +
+      "mIAtDIwg9D7gC1xzxBl4r28EzmSO1pcCIQCJUShpSXO9HDIQMUgH69fNDEMHXD3R" +
+      "RX5gP7kuu2KGMg=="
+
+  private val leaf         = certificate(leafBase64)
+  private val intermediate = certificate(intermediateBase64)
 
   "ClientCertificateHeaderHandler" should {
     "ignore forwarded certificate fields when handling is off" in {
@@ -83,12 +97,60 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
 
       handler.clientCertificate(
         transport("127.0.0.1"),
-        headers(HeaderNames.CLIENT_CERT -> s":$leafBase64:")
+        headers(HeaderNames.CLIENT_CERT -> byteSequence(leafBase64))
       ) must beSome[ClientCertificateInfo].like {
         case info =>
           (info.certificate.getEncoded must beEqualTo(leaf.getEncoded))
             .and(info.source must_== ClientCertificateSource.Rfc9440)
       }
+    }
+
+    "preserve valid forwarded certificate metadata when constructing an error request" in {
+      val selected = rfcHandler("127.0.0.1").clientCertificatesForErrorRequest(
+        transport("127.0.0.1", Seq(intermediate)),
+        headers(HeaderNames.CLIENT_CERT -> byteSequence(leafBase64)),
+        new IllegalArgumentException("invalid request target")
+      )
+
+      selected.clientCertificate must beSome[ClientCertificateInfo].like {
+        case info =>
+          (info.certificate.getEncoded must beEqualTo(leaf.getEncoded))
+            .and(info.source must_== ClientCertificateSource.Rfc9440)
+      }
+    }
+
+    "omit effective certificate metadata after a forwarding error instead of selecting the proxy certificate" in {
+      val handler         = xfccHandler("127.0.0.1")
+      val directTransport = transport("127.0.0.1", Seq(leaf))
+      val requestHeaders  = headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> "not-valid-xfcc")
+      val requestFailure  = scala.util.Try(handler.clientCertificates(directTransport, requestHeaders)).failed.get
+      val selected        =
+        handler.clientCertificatesForErrorRequest(directTransport, requestHeaders, requestFailure)
+
+      selected.clientCertificate must beNone
+      selected.xForwardedClientCertificates must beEmpty
+    }
+
+    "not repeat certificate selection after it failed during normal request conversion" in {
+      val handler         = xfccHandler("127.0.0.1")
+      val directTransport = transport("127.0.0.1", Seq(intermediate))
+      val requestFailure  = scala.util
+        .Try(
+          handler.clientCertificates(
+            directTransport,
+            headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> "not-valid-xfcc")
+          )
+        )
+        .failed
+        .get
+
+      val selected = handler.clientCertificatesForErrorRequest(
+        directTransport,
+        headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> s"Cert=${percentEncode(pem(leafBase64))}"),
+        requestFailure
+      )
+
+      selected must_== ClientCertificateHeaderHandler.Selection.empty
     }
 
     "retain a trusted metadata-only XFCC assertion without inventing an effective certificate" in {
@@ -181,6 +243,8 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
 
   private def headers(values: (String, String)*): Headers = new Headers(values)
 
+  private def byteSequence(base64: String): String = s":$base64:"
+
   private def pem(base64: String): String =
     s"-----BEGIN CERTIFICATE-----\n$base64\n-----END CERTIFICATE-----\n"
 
@@ -203,6 +267,7 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
     }
     result.result()
   }
+
   private def certificate(base64: String): X509Certificate =
     CertificateFactory
       .getInstance("X.509")

@@ -354,11 +354,12 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       ServerDebugInfo.attachToRequestHeader(rh, debugInfo)
     }
 
-    def clientError(statusCode: Int, message: String): (RequestHeader, Handler) = {
+    def clientError(statusCode: Int, message: String, requestFailure: Throwable): (RequestHeader, Handler) = {
       val headers        = modelConversion(tryApp).convertRequestHeadersPekko(decodedRequest)
       val unparsedTarget = Server.createUnparsedRequestTarget(headers.uri)
       val requestHeader  =
-        modelConversion(tryApp).createErrorRequestHeader(headers, secure, remoteAddress, unparsedTarget, request)
+        modelConversion(tryApp)
+          .createErrorRequestHeader(headers, secure, remoteAddress, unparsedTarget, request, requestFailure)
       val debugHeader   = attachDebugInfo(requestHeader)
       val maybeEnriched = Server.tryToEnrichHeader(tryApp, debugHeader)
       val result        = errorHandler(tryApp).onClientError(
@@ -372,7 +373,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
 
     val (taggedRequestHeader, handler): (RequestHeader, Handler) = convertedRequestHeader match {
       case Failure(exception) =>
-        clientError(Status.BAD_REQUEST, exception.getMessage)
+        clientError(Status.BAD_REQUEST, exception.getMessage, exception)
       case Success(untagged) =>
         val debugHeader = attachDebugInfo(untagged)
         Server.getHandlerFor(debugHeader, tryApp, fallbackErrorHandler)

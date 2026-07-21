@@ -4,6 +4,8 @@
 
 package play.core.server.common
 
+import scala.util.control.NonFatal
+
 import com.typesafe.config.ConfigMemorySize
 import play.api.mvc.request.ClientCertificateInfo
 import play.api.mvc.request.ClientCertificateSource
@@ -11,10 +13,12 @@ import play.api.mvc.request.TransportConnection
 import play.api.mvc.request.XForwardedClientCert
 import play.api.mvc.Headers
 import play.api.Configuration
+import play.api.Logger
 import play.core.server.common.ClientCertificateHeaderHandler._
 
 /** Selects direct or trusted forwarded client-certificate metadata for a request. */
 private[server] final class ClientCertificateHeaderHandler(configuration: Config) {
+  private val logger = Logger(classOf[ClientCertificateHeaderHandler])
 
   def clientCertificates(transport: TransportConnection, headers: Headers): Selection = {
     configuration.mode match {
@@ -24,7 +28,9 @@ private[server] final class ClientCertificateHeaderHandler(configuration: Config
         Rfc9440ClientCertificateParser.parse(headers, configuration.limits) match {
           case Right(value) => Selection(value, Vector.empty)
           case Left(error)  =>
-            throw new IllegalArgumentException(s"Forwarded client certificate limits exceeded: $error")
+            throw new InvalidClientCertificateHeaderException(
+              s"Forwarded client certificate limits exceeded: $error"
+            )
         }
       case XForwardedClientCertMode =>
         XForwardedClientCertHeaderParser.parse(
@@ -38,8 +44,34 @@ private[server] final class ClientCertificateHeaderHandler(configuration: Config
         ) match {
           case Right(assertions) => Selection.fromXForwardedClientCert(assertions)
           case Left(error)       =>
-            throw new IllegalArgumentException(s"Invalid forwarded client certificate: $error")
+            throw new InvalidClientCertificateHeaderException(s"Invalid forwarded client certificate: $error")
         }
+    }
+  }
+
+  /**
+   * Select certificate metadata for an error request without repeating selection that already
+   * failed during normal request conversion.
+   */
+  def clientCertificatesForErrorRequest(
+      transport: TransportConnection,
+      headers: Headers,
+      requestFailure: Throwable
+  ): Selection = {
+    if (requestFailure.isInstanceOf[InvalidClientCertificateHeaderException]) {
+      Selection.empty
+    } else {
+      try {
+        clientCertificates(transport, headers)
+      } catch {
+        case _: InvalidClientCertificateHeaderException => Selection.empty
+        case NonFatal(error)                            =>
+          logger.warn(
+            "Failed to apply forwarded client certificate metadata to an error request; omitting effective metadata.",
+            error
+          )
+          Selection.empty
+      }
     }
   }
 
@@ -49,6 +81,9 @@ private[server] final class ClientCertificateHeaderHandler(configuration: Config
 }
 
 private[server] object ClientCertificateHeaderHandler {
+  private[server] final class InvalidClientCertificateHeaderException(message: String)
+      extends IllegalArgumentException(message)
+
   sealed trait Mode
   case object Off                      extends Mode
   case object Rfc9440                  extends Mode
@@ -60,6 +95,8 @@ private[server] object ClientCertificateHeaderHandler {
   )
 
   object Selection {
+    val empty: Selection = Selection(None, Vector.empty)
+
     def direct(transport: TransportConnection): Selection =
       Selection(ClientCertificateInfo.fromTransport(transport), Vector.empty)
 

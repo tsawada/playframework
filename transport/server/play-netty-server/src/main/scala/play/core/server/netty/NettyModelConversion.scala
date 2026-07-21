@@ -34,7 +34,6 @@ import play.api.http.HttpEntity
 import play.api.http.HttpErrorHandler
 import play.api.libs.typedmap.TypedMap
 import play.api.mvc._
-import play.api.mvc.request.ClientCertificateInfo
 import play.api.mvc.request.PeerEndpoint
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAttrKey
@@ -121,12 +120,11 @@ private[server] class NettyModelConversion(
    * later.
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val transport          = createTransport(channel)
-    val rawRemote          = RemoteInfo.fromPeer(transport.peer)
-    val rawHeaders         = new NettyHeadersWrapper(request.headers)
-    val clientCertificates = clientCertificateHeaderHandler.clientCertificates(transport, rawHeaders)
-    val directScheme       = RequestHeader.initialScheme(transport)
-    val initialTarget      = RequestHeader
+    val transport     = createTransport(channel)
+    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders    = new NettyHeadersWrapper(request.headers)
+    val directScheme  = RequestHeader.initialScheme(transport)
+    val initialTarget = RequestHeader
       .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
       .fold(error => throw new IllegalArgumentException(error), identity)
     val forwarding = forwardedHeaderHandler.forwardedRequest(
@@ -138,8 +136,9 @@ private[server] class NettyModelConversion(
     val effectiveScheme = RequestHeader
       .effectiveScheme(initialTarget.scheme, directScheme, forwarding.scheme)
       .fold(error => throw new IllegalArgumentException(error), identity)
-    val normalizedTarget = RequestHeader.normalizeRequestTargetPath(target, initialTarget)
-    val attrs            = TypedMap(
+    val normalizedTarget   = RequestHeader.normalizeRequestTargetPath(target, initialTarget)
+    val clientCertificates = clientCertificateHeaderHandler.clientCertificates(transport, rawHeaders)
+    val attrs              = TypedMap(
       // Send an attribute so our tests can tell which kind of server we're using.
       // We only do this for the "non-default" engine, so we used to tag
       // pekko-http explicitly, so that benchmarking isn't affected by this.
@@ -171,13 +170,19 @@ private[server] class NettyModelConversion(
    * falls back to the directly observed request metadata so construction for HttpErrorHandler cannot
    * repeat the original failure.
    */
-  def createErrorRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val transport         = createTransport(channel)
-    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
-    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
-    val rawHeaders        = new NettyHeadersWrapper(request.headers)
-    val directScheme      = RequestHeader.initialScheme(transport)
-    val initialTarget     = RequestHeader
+  def createErrorRequestHeader(
+      channel: Channel,
+      request: HttpRequest,
+      target: RequestTarget,
+      requestFailure: Throwable
+  ): RequestHeader = {
+    val transport          = createTransport(channel)
+    val rawRemote          = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders         = new NettyHeadersWrapper(request.headers)
+    val clientCertificates =
+      clientCertificateHeaderHandler.clientCertificatesForErrorRequest(transport, rawHeaders, requestFailure)
+    val directScheme  = RequestHeader.initialScheme(transport)
+    val initialTarget = RequestHeader
       .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
       .toOption
     val initialAuthority = initialTarget.flatMap(_.authority)
@@ -204,9 +209,10 @@ private[server] class NettyModelConversion(
       rawHeaders,
       attrs,
       transport,
-      clientCertificate,
+      clientCertificates.clientCertificate,
       scheme,
-      forwarding.authority
+      forwarding.authority,
+      clientCertificates.xForwardedClientCertificates
     )
   }
 
