@@ -104,8 +104,9 @@ private[server] class NettyModelConversion(
         try {
           decoder.parameters().asScala.view.mapValues(_.asScala.toList).toMap
         } catch {
-          case iae: IllegalArgumentException if iae.getMessage.startsWith("invalid hex byte") => throw iae
-          case NonFatal(e)                                                                    =>
+          case iae: IllegalArgumentException if Option(iae.getMessage).exists(_.startsWith("invalid hex byte")) =>
+            throw iae
+          case NonFatal(e) =>
             logger.warn("Failed to parse query string; returning empty map.", e)
             Map.empty
         }

@@ -28,6 +28,7 @@ import play.api.mvc.request.RequestAttrKey
 import play.api.Application
 import play.api.Logger
 import play.api.Mode
+import play.core.server.common.ClientCertificateHeaderHandler.InvalidClientCertificateHeaderException
 import play.core.server.common.ReloadCache
 import play.core.server.common.ServerDebugInfo
 import play.core.server.common.ServerResultUtils
@@ -146,7 +147,15 @@ private[play] class PlayRequestHandler(
     }
 
     val (requestHeader, handler): (RequestHeader, Handler) = tryRequest match {
-      case Failure(exception: IllegalArgumentException) if exception.getMessage.startsWith("invalid hex byte") =>
+      case Failure(exception: InvalidClientCertificateHeaderException) =>
+        logger.debug("Rejected invalid forwarded client certificate metadata.", exception)
+        clientError(
+          Status.BAD_REQUEST,
+          "Invalid forwarded client certificate",
+          requestFailure = Some(exception)
+        )
+      case Failure(exception: IllegalArgumentException)
+          if Option(exception.getMessage).exists(_.startsWith("invalid hex byte")) =>
         clientError(
           Status.BAD_REQUEST,
           exception.getMessage,
