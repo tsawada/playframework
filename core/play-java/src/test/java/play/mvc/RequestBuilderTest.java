@@ -7,6 +7,7 @@ package play.mvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.*;
+import static org.mockito.Mockito.mock;
 
 import com.google.common.net.InetAddresses;
 import java.io.File;
@@ -14,6 +15,7 @@ import java.io.IOException;
 import java.math.BigInteger;
 import java.net.Inet6Address;
 import java.net.URISyntaxException;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -274,6 +276,26 @@ public class RequestBuilderTest {
     assertTrue(request.transport().tls().isPresent());
     assertEquals(List.of(), request.transport().tls().orElseThrow().peerCertificates());
     assertFalse(request.secure());
+  }
+
+  @Test
+  public void testClientCertificateIsBuilderState() {
+    X509Certificate leaf = mock(X509Certificate.class);
+    X509Certificate intermediate = mock(X509Certificate.class);
+    Http.ClientCertificateInfo certificate =
+        new Http.ClientCertificateInfo(
+            leaf, List.of(intermediate), Http.ClientCertificateSource.RFC_9440);
+
+    RequestBuilder builder = new RequestBuilder().clientCertificate(certificate);
+    Request request = builder.build();
+
+    assertEquals(Optional.of(certificate), builder.clientCertificate());
+    assertEquals(Optional.of(certificate), request.clientCertificate());
+    assertEquals(certificate, request.asScala().clientCertificate().get().asJava());
+
+    builder.clientCertificate(Optional.empty());
+    assertEquals(Optional.empty(), builder.clientCertificate());
+    assertEquals(Optional.empty(), builder.build().clientCertificate());
   }
 
   @Test

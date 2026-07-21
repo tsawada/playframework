@@ -232,6 +232,66 @@ public class Http {
     }
   }
 
+  /** The source from which Play selected an effective client certificate. */
+  public enum ClientCertificateSource {
+    /** The certificate was observed on the TLS connection directly terminating at Play. */
+    DIRECT_TRANSPORT,
+
+    /** The certificate was accepted from the RFC 9440 {@code Client-Cert} header fields. */
+    RFC_9440,
+
+    /** The certificate was accepted from {@code X-Forwarded-Client-Cert}. */
+    X_FORWARDED_CLIENT_CERT;
+
+    /**
+     * @return the Scala version of this client certificate source
+     */
+    public play.api.mvc.request.ClientCertificateSource asScala() {
+      return switch (this) {
+        case DIRECT_TRANSPORT ->
+            play.api.mvc.request.ClientCertificateSource$.MODULE$.directTransport();
+        case RFC_9440 -> play.api.mvc.request.ClientCertificateSource$.MODULE$.rfc9440();
+        case X_FORWARDED_CLIENT_CERT ->
+            play.api.mvc.request.ClientCertificateSource$.MODULE$.xForwardedClientCert();
+      };
+    }
+  }
+
+  /** The effective X.509 client certificate selected for a request. */
+  public record ClientCertificateInfo(
+      X509Certificate certificate, List<X509Certificate> chain, ClientCertificateSource source) {
+
+    public ClientCertificateInfo {
+      Objects.requireNonNull(certificate, "certificate");
+      chain = List.copyOf(chain);
+      Objects.requireNonNull(source, "source");
+      if (chain.contains(certificate)) {
+        throw new IllegalArgumentException(
+            "An effective client certificate chain must not repeat the leaf certificate");
+      }
+    }
+
+    /**
+     * Return the effective leaf-and-chain sequence, with the leaf first.
+     *
+     * @return the immutable leaf-and-chain sequence
+     */
+    public List<X509Certificate> certificates() {
+      ArrayList<X509Certificate> certificates = new ArrayList<>(chain.size() + 1);
+      certificates.add(certificate);
+      certificates.addAll(chain);
+      return List.copyOf(certificates);
+    }
+
+    /**
+     * @return the Scala version of this effective client certificate information
+     */
+    public play.api.mvc.request.ClientCertificateInfo asScala() {
+      return play.api.mvc.request.ClientCertificateInfo$.MODULE$.create(
+          certificate, Scala.asScala(chain), source.asScala());
+    }
+  }
+
   /** Immutable metadata about the transport connection directly terminating at Play. */
   public record TransportConnection(PeerEndpoint peer, Optional<TransportTls> tls) {
     public TransportConnection {
@@ -728,6 +788,13 @@ public class Http {
     }
 
     /**
+     * @return the effective X.509 client certificate selected for this request, if present
+     */
+    default Optional<ClientCertificateInfo> clientCertificate() {
+      return OptionConverters.toJava(asScala().clientCertificate()).map(value -> value.asJava());
+    }
+
+    /**
      * @return the normalized effective request scheme
      */
     default Scheme scheme() {
@@ -1178,6 +1245,7 @@ public class Http {
       req =
           requestFactory.createRequest(
               transport,
+              OptionConverters.toScala(Optional.empty()),
               remote,
               play.api.mvc.request.Scheme$.MODULE$.Http(),
               OptionConverters.toScala(Optional.empty()),
@@ -1966,6 +2034,33 @@ public class Http {
     public RequestBuilder transport(TransportConnection transport) {
       req = req.withTransport(transport.asScala());
       return this;
+    }
+
+    /**
+     * @return the effective X.509 client certificate selected for this request, if present
+     */
+    public Optional<ClientCertificateInfo> clientCertificate() {
+      return OptionConverters.toJava(req.clientCertificate()).map(value -> value.asJava());
+    }
+
+    /**
+     * @param clientCertificate sets the effective client certificate, or empty to remove it
+     * @return the builder instance
+     */
+    public RequestBuilder clientCertificate(Optional<ClientCertificateInfo> clientCertificate) {
+      Objects.requireNonNull(clientCertificate, "clientCertificate");
+      req =
+          req.withClientCertificate(
+              OptionConverters.toScala(clientCertificate.map(ClientCertificateInfo::asScala)));
+      return this;
+    }
+
+    /**
+     * @param clientCertificate sets the effective client certificate
+     * @return the builder instance
+     */
+    public RequestBuilder clientCertificate(ClientCertificateInfo clientCertificate) {
+      return clientCertificate(Optional.of(clientCertificate));
     }
 
     /**

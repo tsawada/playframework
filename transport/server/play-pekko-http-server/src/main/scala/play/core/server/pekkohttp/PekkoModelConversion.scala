@@ -27,6 +27,7 @@ import play.api.http.HttpChunk
 import play.api.http.HttpErrorHandler
 import play.api.libs.typedmap.TypedMap
 import play.api.mvc._
+import play.api.mvc.request.ClientCertificateInfo
 import play.api.mvc.request.PeerEndpoint
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAttrKey
@@ -89,10 +90,11 @@ private[server] class PekkoModelConversion(
       requestTarget: RequestTarget,
       request: HttpRequest
   ): RequestHeader = {
-    val transport     = createTransport(remoteAddress, secureProtocol, request)
-    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
-    val directScheme  = RequestHeader.initialScheme(transport)
-    val initialTarget = RequestHeader
+    val transport         = createTransport(remoteAddress, secureProtocol, request)
+    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
+    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
+    val directScheme      = RequestHeader.initialScheme(transport)
+    val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name, requestTarget, request.protocol.value, headers)
       .fold(error => throw new IllegalArgumentException(error), identity)
     val forwarding = forwardedHeaderHandler.forwardedRequest(
@@ -117,6 +119,7 @@ private[server] class PekkoModelConversion(
       headers,
       attrs,
       transport,
+      clientCertificate,
       effectiveScheme,
       forwarding.authority
     )
@@ -138,10 +141,11 @@ private[server] class PekkoModelConversion(
       requestTarget: RequestTarget,
       request: HttpRequest
   ): RequestHeader = {
-    val transport     = createTransport(remoteAddress, secureProtocol, request)
-    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
-    val directScheme  = RequestHeader.initialScheme(transport)
-    val initialTarget = RequestHeader
+    val transport         = createTransport(remoteAddress, secureProtocol, request)
+    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
+    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
+    val directScheme      = RequestHeader.initialScheme(transport)
+    val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name, requestTarget, request.protocol.value, headers)
       .toOption
     val initialAuthority = initialTarget.flatMap(_.authority)
@@ -165,6 +169,7 @@ private[server] class PekkoModelConversion(
       headers,
       attrs,
       transport,
+      clientCertificate,
       scheme,
       forwarding.authority
     )

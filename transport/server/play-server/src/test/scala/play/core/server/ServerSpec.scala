@@ -32,6 +32,7 @@ class ServerSpec extends Specification {
       Headers(),
       TypedMap.empty,
       transport,
+      None,
       Scheme.Http,
       None
     )

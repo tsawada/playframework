@@ -34,6 +34,7 @@ import play.api.http.HttpEntity
 import play.api.http.HttpErrorHandler
 import play.api.libs.typedmap.TypedMap
 import play.api.mvc._
+import play.api.mvc.request.ClientCertificateInfo
 import play.api.mvc.request.PeerEndpoint
 import play.api.mvc.request.RemoteInfo
 import play.api.mvc.request.RequestAttrKey
@@ -118,11 +119,12 @@ private[server] class NettyModelConversion(
    * later.
    */
   def createRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val transport     = createTransport(channel)
-    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
-    val rawHeaders    = new NettyHeadersWrapper(request.headers)
-    val directScheme  = RequestHeader.initialScheme(transport)
-    val initialTarget = RequestHeader
+    val transport         = createTransport(channel)
+    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
+    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders        = new NettyHeadersWrapper(request.headers)
+    val directScheme      = RequestHeader.initialScheme(transport)
+    val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
       .fold(error => throw new IllegalArgumentException(error), identity)
     val forwarding = forwardedHeaderHandler.forwardedRequest(
@@ -151,6 +153,7 @@ private[server] class NettyModelConversion(
       rawHeaders,
       attrs,
       transport,
+      clientCertificate,
       effectiveScheme,
       forwarding.authority
     )
@@ -166,11 +169,12 @@ private[server] class NettyModelConversion(
    * repeat the original failure.
    */
   def createErrorRequestHeader(channel: Channel, request: HttpRequest, target: RequestTarget): RequestHeader = {
-    val transport     = createTransport(channel)
-    val rawRemote     = RemoteInfo.fromPeer(transport.peer)
-    val rawHeaders    = new NettyHeadersWrapper(request.headers)
-    val directScheme  = RequestHeader.initialScheme(transport)
-    val initialTarget = RequestHeader
+    val transport         = createTransport(channel)
+    val clientCertificate = ClientCertificateInfo.fromTransport(transport)
+    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
+    val rawHeaders        = new NettyHeadersWrapper(request.headers)
+    val directScheme      = RequestHeader.initialScheme(transport)
+    val initialTarget     = RequestHeader
       .initialRequestTarget(request.method.name(), target, request.protocolVersion.text(), rawHeaders)
       .toOption
     val initialAuthority = initialTarget.flatMap(_.authority)
@@ -197,6 +201,7 @@ private[server] class NettyModelConversion(
       rawHeaders,
       attrs,
       transport,
+      clientCertificate,
       scheme,
       forwarding.authority
     )

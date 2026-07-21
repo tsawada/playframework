@@ -207,13 +207,15 @@ object JavaHelpers extends JavaHelpers {
 class RequestHeaderImpl(header: RequestHeader) extends JRequestHeader {
   override def asScala: RequestHeader = header
 
-  override def uri: String                                = header.uri
-  override def method: String                             = header.method
-  override def version: String                            = header.version
-  override def scheme: Http.Scheme                        = header.scheme.asJava
-  override def authority: Optional[Http.RequestAuthority] = header.authority.map(_.asJava).toJava
-  override def remote: Http.RemoteInfo                    = header.remote.asJava
-  override def secure: Boolean                            = header.secure
+  override def uri: String                                             = header.uri
+  override def method: String                                          = header.method
+  override def version: String                                         = header.version
+  override def scheme: Http.Scheme                                     = header.scheme.asJava
+  override def authority: Optional[Http.RequestAuthority]              = header.authority.map(_.asJava).toJava
+  override def remote: Http.RemoteInfo                                 = header.remote.asJava
+  override def clientCertificate: Optional[Http.ClientCertificateInfo] =
+    header.clientCertificate.map(_.asJava).toJava
+  override def secure: Boolean = header.secure
 
   override def attrs: TypedMap                                                                   = new TypedMap(header.attrs)
   override def withAttrs(newAttrs: TypedMap): JRequestHeader                                     = header.withAttrs(newAttrs.asScala).asJava

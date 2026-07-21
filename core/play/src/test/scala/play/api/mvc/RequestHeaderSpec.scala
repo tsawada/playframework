@@ -4,9 +4,11 @@
 
 package play.api.mvc
 
+import java.security.cert.X509Certificate
 import java.util.Locale
 
 import com.google.common.net.InetAddresses
+import org.mockito.Mockito
 import org.specs2.mutable.Specification
 import play.api.http.HeaderNames._
 import play.api.http.HttpConfiguration
@@ -15,6 +17,8 @@ import play.api.i18n.Messages
 import play.api.libs.typedmap.TypedEntry
 import play.api.libs.typedmap.TypedKey
 import play.api.libs.typedmap.TypedMap
+import play.api.mvc.request.ClientCertificateInfo
+import play.api.mvc.request.ClientCertificateSource
 import play.api.mvc.request.DefaultRequestFactory
 import play.api.mvc.request.NodePort
 import play.api.mvc.request.PeerEndpoint
@@ -100,6 +104,33 @@ class RequestHeaderSpec extends Specification {
       ok
     }
 
+    "preserve effective client certificate metadata across unrelated request copies" in {
+      val leaf         = Mockito.mock(classOf[X509Certificate])
+      val intermediate = Mockito.mock(classOf[X509Certificate])
+      val certificate  = ClientCertificateInfo(leaf, Vector(intermediate), ClientCertificateSource.Rfc9440)
+      val request      = dummyRequestHeader().withClientCertificate(Some(certificate))
+
+      request.asJava.clientCertificate.orElseThrow() must beEqualTo(certificate.asJava)
+      Seq(
+        request.withTransport(
+          TransportConnection(PeerEndpoint(InetAddresses.forString("192.0.2.10"), Some(53124)), None)
+        ),
+        request.withRemote(RemoteInfo.ip("203.0.113.43", None)),
+        request.withScheme(Scheme.Https),
+        request.withAuthority(Some(RequestAuthority.parseOrThrow("public.example"))),
+        request.withMethod("POST"),
+        request.withTarget(RequestTarget("/copy", "/copy", Map.empty)),
+        request.withVersion("HTTP/2"),
+        request.withHeaders(Headers("X-Test" -> "copy")),
+        request.withAttrs(TypedMap.empty),
+        request.withBody("body")
+      ).foreach(_.clientCertificate must beSome(certificate))
+
+      request.withClientCertificate(None).clientCertificate must beNone
+      request.withClientCertificate(null) must throwA[IllegalArgumentException]
+      request.withClientCertificate(Some(null)) must throwA[IllegalArgumentException]
+    }
+
     "preserve selected remote metadata across unrelated request copies" in {
       val remote  = RemoteInfo(RemoteNode.Obfuscated("_anonymous", Some(NodePort.Obfuscated("_source"))), None)
       val request = dummyRequestHeader().withRemote(remote)
@@ -137,6 +168,7 @@ class RequestHeaderSpec extends Specification {
       ): RequestHeader =
         RequestFactory.plain.createRequestHeader(
           transport,
+          request.clientCertificate,
           remote,
           scheme,
           authority,
@@ -156,15 +188,16 @@ class RequestHeaderSpec extends Specification {
 
     "allow custom request headers to define their own remote shortcut names" in {
       final class CustomRequestHeader(delegate: RequestHeader) extends RequestHeader {
-        override def transport: TransportConnection      = delegate.transport
-        override def remote: RemoteInfo                  = delegate.remote
-        override def scheme: Scheme                      = delegate.scheme
-        override def authority: Option[RequestAuthority] = delegate.authority
-        override def method: String                      = delegate.method
-        override def target: RequestTarget               = delegate.target
-        override def version: String                     = delegate.version
-        override def headers: Headers                    = delegate.headers
-        override def attrs: TypedMap                     = delegate.attrs
+        override def transport: TransportConnection                   = delegate.transport
+        override def clientCertificate: Option[ClientCertificateInfo] = delegate.clientCertificate
+        override def remote: RemoteInfo                               = delegate.remote
+        override def scheme: Scheme                                   = delegate.scheme
+        override def authority: Option[RequestAuthority]              = delegate.authority
+        override def method: String                                   = delegate.method
+        override def target: RequestTarget                            = delegate.target
+        override def version: String                                  = delegate.version
+        override def headers: Headers                                 = delegate.headers
+        override def attrs: TypedMap                                  = delegate.attrs
 
         def remoteIdentity: String  = "application-defined"
         def remotePort: Option[Int] = Some(43210)
@@ -663,6 +696,7 @@ class RequestHeaderSpec extends Specification {
       .fold(error => throw new IllegalArgumentException(error), identity)
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       transport = transport,
+      clientCertificate = None,
       remote = remote,
       scheme = RequestHeader.initialScheme(transport),
       authority = authority,
@@ -683,14 +717,15 @@ class RequestHeaderSpec extends Specification {
     RequestHeader.initialRequestTarget(method, RequestTarget(uri, "", Map.empty), version, headers)
 
   private def dummyRawRequestHeaderWithEmptyAttrs() = new RequestHeader {
-    override def transport: TransportConnection      = ???
-    override def scheme: Scheme                      = ???
-    override def authority: Option[RequestAuthority] = ???
-    override def remote: RemoteInfo                  = ???
-    override def method: String                      = ???
-    override def target: RequestTarget               = ???
-    override def version: String                     = ???
-    override def headers: Headers                    = ???
-    override def attrs: TypedMap                     = TypedMap.empty
+    override def transport: TransportConnection                   = ???
+    override def clientCertificate: Option[ClientCertificateInfo] = ???
+    override def scheme: Scheme                                   = ???
+    override def authority: Option[RequestAuthority]              = ???
+    override def remote: RemoteInfo                               = ???
+    override def method: String                                   = ???
+    override def target: RequestTarget                            = ???
+    override def version: String                                  = ???
+    override def headers: Headers                                 = ???
+    override def attrs: TypedMap                                  = TypedMap.empty
   }
 }

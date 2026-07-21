@@ -54,6 +54,7 @@ class ServerResultUtilsSpec extends Specification {
     val remote    = RemoteInfo.fromPeer(transport.peer)
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       transport,
+      None,
       remote,
       Scheme.Http,
       None,
@@ -128,6 +129,7 @@ class ServerResultUtilsSpec extends Specification {
       Headers(),
       TypedMap.empty,
       transport,
+      None,
       Scheme.Http,
       None
     )
