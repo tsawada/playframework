@@ -92,11 +92,11 @@ private[server] class PekkoModelConversion(
       requestTarget: RequestTarget,
       request: HttpRequest
   ): RequestHeader = {
-    val transport         = createTransport(remoteAddress, secureProtocol, request)
-    val rawRemote         = RemoteInfo.fromPeer(transport.peer)
-    val clientCertificate = clientCertificateHeaderHandler.clientCertificate(transport, headers)
-    val directScheme      = RequestHeader.initialScheme(transport)
-    val initialTarget     = RequestHeader
+    val transport          = createTransport(remoteAddress, secureProtocol, request)
+    val rawRemote          = RemoteInfo.fromPeer(transport.peer)
+    val clientCertificates = clientCertificateHeaderHandler.clientCertificates(transport, headers)
+    val directScheme       = RequestHeader.initialScheme(transport)
+    val initialTarget      = RequestHeader
       .initialRequestTarget(request.method.name, requestTarget, request.protocol.value, headers)
       .fold(error => throw new IllegalArgumentException(error), identity)
     val forwarding = forwardedHeaderHandler.forwardedRequest(
@@ -121,9 +121,10 @@ private[server] class PekkoModelConversion(
       headers,
       attrs,
       transport,
-      clientCertificate,
+      clientCertificates.clientCertificate,
       effectiveScheme,
-      forwarding.authority
+      forwarding.authority,
+      clientCertificates.xForwardedClientCertificates
     )
   }
 

@@ -6,7 +6,9 @@ package play.core.server.common
 
 import com.typesafe.config.ConfigMemorySize
 import play.api.mvc.request.ClientCertificateInfo
+import play.api.mvc.request.ClientCertificateSource
 import play.api.mvc.request.TransportConnection
+import play.api.mvc.request.XForwardedClientCert
 import play.api.mvc.Headers
 import play.api.Configuration
 import play.core.server.common.ClientCertificateHeaderHandler._
@@ -14,24 +16,62 @@ import play.core.server.common.ClientCertificateHeaderHandler._
 /** Selects direct or trusted forwarded client-certificate metadata for a request. */
 private[server] final class ClientCertificateHeaderHandler(configuration: Config) {
 
-  def clientCertificate(transport: TransportConnection, headers: Headers): Option[ClientCertificateInfo] = {
+  def clientCertificates(transport: TransportConnection, headers: Headers): Selection = {
     configuration.mode match {
-      case Off                                                 => ClientCertificateInfo.fromTransport(transport)
-      case Rfc9440 if !configuration.isTrustedProxy(transport) => ClientCertificateInfo.fromTransport(transport)
-      case Rfc9440                                             =>
+      case Off                                           => Selection.direct(transport)
+      case _ if !configuration.isTrustedProxy(transport) => Selection.direct(transport)
+      case Rfc9440                                       =>
         Rfc9440ClientCertificateParser.parse(headers, configuration.limits) match {
-          case Right(value) => value
+          case Right(value) => Selection(value, Vector.empty)
           case Left(error)  =>
             throw new IllegalArgumentException(s"Forwarded client certificate limits exceeded: $error")
         }
+      case XForwardedClientCertMode =>
+        XForwardedClientCertHeaderParser.parse(
+          headers.getAll(play.api.http.HeaderNames.X_FORWARDED_CLIENT_CERT),
+          XForwardedClientCertHeaderParser.Limits(
+            configuration.limits.maxHeaderBytes,
+            configuration.limits.maxDecodedBytes,
+            configuration.limits.maxCertificateBytes,
+            configuration.limits.maxChainLength
+          )
+        ) match {
+          case Right(assertions) => Selection.fromXForwardedClientCert(assertions)
+          case Left(error)       =>
+            throw new IllegalArgumentException(s"Invalid forwarded client certificate: $error")
+        }
     }
   }
+
+  /** Select only the effective certificate when XFCC assertion metadata is not needed. */
+  def clientCertificate(transport: TransportConnection, headers: Headers): Option[ClientCertificateInfo] =
+    clientCertificates(transport, headers).clientCertificate
 }
 
 private[server] object ClientCertificateHeaderHandler {
   sealed trait Mode
-  case object Off     extends Mode
-  case object Rfc9440 extends Mode
+  case object Off                      extends Mode
+  case object Rfc9440                  extends Mode
+  case object XForwardedClientCertMode extends Mode
+
+  final case class Selection(
+      clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert]
+  )
+
+  object Selection {
+    def direct(transport: TransportConnection): Selection =
+      Selection(ClientCertificateInfo.fromTransport(transport), Vector.empty)
+
+    def fromXForwardedClientCert(assertions: Vector[XForwardedClientCert]): Selection = {
+      val effective = assertions.headOption.flatMap { assertion =>
+        assertion.certificate.map { certificate =>
+          ClientCertificateInfo(certificate, assertion.chain, ClientCertificateSource.XForwardedClientCert)
+        }
+      }
+      Selection(effective, assertions)
+    }
+  }
 
   final case class Config(mode: Mode, trustedProxies: List[Subnet], limits: ClientCertificateHeaderLimits) {
     def isTrustedProxy(transport: TransportConnection): Boolean =
@@ -45,10 +85,24 @@ private[server] object ClientCertificateHeaderHandler {
         .get[Configuration]("play.http.forwarded.clientCertificates")
 
       val mode = config.get[String]("mode") match {
-        case "off"     => Off
-        case "rfc9440" => Rfc9440
-        case _         =>
-          throw config.reportError("mode", "Forwarded client certificate mode must be either off or rfc9440")
+        case "off"                     => Off
+        case "rfc9440"                 => Rfc9440
+        case "x-forwarded-client-cert" => XForwardedClientCertMode
+        case _                         =>
+          throw config.reportError(
+            "mode",
+            "Forwarded client certificate mode must be off, rfc9440, or x-forwarded-client-cert"
+          )
+      }
+
+      if (config.get[String]("xForwardedClientCert.policy") != "sanitized-single") {
+        throw config.reportError(
+          "xForwardedClientCert.policy",
+          "X-Forwarded-Client-Cert policy must be sanitized-single"
+        )
+      }
+      if (config.get[String]("xForwardedClientCert.format") != "text") {
+        throw config.reportError("xForwardedClientCert.format", "X-Forwarded-Client-Cert format must be text")
       }
 
       def positiveBytes(path: String): Long = {
@@ -61,7 +115,6 @@ private[server] object ClientCertificateHeaderHandler {
       if (maxChainLength < 0) {
         throw config.reportError("limits.maxChainLength", "maxChainLength must not be negative")
       }
-
       Config(
         mode,
         config.get[Seq[String]]("trustedProxies").map(Subnet.apply).toList,

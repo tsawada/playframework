@@ -22,6 +22,7 @@ import play.api.Configuration
 import play.core.server.common.ClientCertificateHeaderHandler.Config
 import play.core.server.common.ClientCertificateHeaderHandler.Off
 import play.core.server.common.ClientCertificateHeaderHandler.Rfc9440
+import play.core.server.common.ClientCertificateHeaderHandler.XForwardedClientCertMode
 
 class ClientCertificateHeaderHandlerSpec extends Specification {
   private val limits = ClientCertificateHeaderLimits(
@@ -54,6 +55,12 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
             info.certificate must_== leaf
             info.source must_== ClientCertificateSource.DirectTransport
         }
+      handler
+        .clientCertificates(
+          transport("127.0.0.1", Seq(leaf)),
+          headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> "bad")
+        )
+        .xForwardedClientCertificates must beEmpty
     }
 
     "ignore forwarded certificate fields from an untrusted direct peer" in {
@@ -84,18 +91,87 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
       }
     }
 
+    "retain a trusted metadata-only XFCC assertion without inventing an effective certificate" in {
+      val handler  = xfccHandler("127.0.0.1")
+      val selected = handler.clientCertificates(
+        transport("127.0.0.1", Seq(leaf)),
+        headers(
+          HeaderNames.X_FORWARDED_CLIENT_CERT ->
+            s"Hash=${"a" * 64};Subject=\"\";URI=spiffe://example.test/workload;DNS=client.example.test"
+        )
+      )
+
+      selected.clientCertificate must beNone
+      selected.xForwardedClientCertificates must beLike {
+        case Vector(assertion) =>
+          (assertion.hash must beSome("a" * 64))
+            .and(assertion.subject must beSome(""))
+            .and(assertion.uris must_== Vector("spiffe://example.test/workload"))
+            .and(assertion.dnsNames must_== Vector("client.example.test"))
+      }
+    }
+
+    "select a trusted XFCC certificate as the effective client certificate" in {
+      val handler  = xfccHandler("127.0.0.1")
+      val selected = handler.clientCertificates(
+        transport("127.0.0.1"),
+        headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> s"Cert=${percentEncode(pem(leafBase64))}")
+      )
+
+      selected.clientCertificate must beSome[ClientCertificateInfo].like {
+        case info =>
+          (info.certificate.getEncoded.toVector must_== leaf.getEncoded.toVector)
+            .and(info.chain must beEmpty)
+            .and(info.source must_== ClientCertificateSource.XForwardedClientCert)
+      }
+      selected.xForwardedClientCertificates must haveSize(1)
+    }
+
+    "ignore malformed XFCC from an untrusted direct peer" in {
+      val handler  = xfccHandler("192.0.2.0/24")
+      val selected = handler.clientCertificates(
+        transport("127.0.0.1", Seq(leaf)),
+        headers(HeaderNames.X_FORWARDED_CLIENT_CERT -> "not-valid-xfcc")
+      )
+
+      selected.clientCertificate must beSome[ClientCertificateInfo].like {
+        case info => info.source must_== ClientCertificateSource.DirectTransport
+      }
+      selected.xForwardedClientCertificates must beEmpty
+    }
+
+    "not mistake a trusted proxy certificate for an absent XFCC assertion" in {
+      val selected = xfccHandler("127.0.0.1").clientCertificates(
+        transport("127.0.0.1", Seq(leaf)),
+        Headers()
+      )
+
+      selected.clientCertificate must beNone
+      selected.xForwardedClientCertificates must beEmpty
+    }
+
     "validate configuration eagerly" in {
       Config(Some(config("play.http.forwarded.clientCertificates.mode" -> "rfc9440"))).mode must_== Rfc9440
-      Config(Some(config("play.http.forwarded.clientCertificates.mode" -> "unknown"))) must throwA[Exception]
+      Config(Some(config("play.http.forwarded.clientCertificates.mode" -> "x-forwarded-client-cert"))).mode must_==
+        XForwardedClientCertMode
+      Config(Some(config("play.http.forwarded.clientCertificates.mode" -> "unknown"))) must
+        throwA[Exception]
       Config(Some(config("play.http.forwarded.clientCertificates.trustedProxies" -> Seq("127.0.0.1/999")))) must
         throwA[Exception]
       Config(Some(config("play.http.forwarded.clientCertificates.limits.maxChainLength" -> -1))) must
+        throwA[Exception]
+      Config(Some(config("play.http.forwarded.clientCertificates.xForwardedClientCert.policy" -> "append"))) must
+        throwA[Exception]
+      Config(Some(config("play.http.forwarded.clientCertificates.xForwardedClientCert.format" -> "json"))) must
         throwA[Exception]
     }
   }
 
   private def rfcHandler(trustedProxy: String): ClientCertificateHeaderHandler =
     new ClientCertificateHeaderHandler(Config(Rfc9440, List(Subnet(trustedProxy)), limits))
+
+  private def xfccHandler(trustedProxy: String): ClientCertificateHeaderHandler =
+    new ClientCertificateHeaderHandler(Config(XForwardedClientCertMode, List(Subnet(trustedProxy)), limits))
 
   private def transport(address: String, certificates: Seq[X509Certificate] = Seq.empty): TransportConnection =
     TransportConnection(
@@ -105,6 +181,28 @@ class ClientCertificateHeaderHandlerSpec extends Specification {
 
   private def headers(values: (String, String)*): Headers = new Headers(values)
 
+  private def pem(base64: String): String =
+    s"-----BEGIN CERTIFICATE-----\n$base64\n-----END CERTIFICATE-----\n"
+
+  private def percentEncode(value: String): String = {
+    val result = new StringBuilder(value.length * 3)
+    val hex    = "0123456789ABCDEF"
+    value.getBytes(java.nio.charset.StandardCharsets.US_ASCII).foreach { byte =>
+      val unsigned = byte & 0xff
+      if (
+        (unsigned >= 'a' && unsigned <= 'z') ||
+        (unsigned >= 'A' && unsigned <= 'Z') ||
+        (unsigned >= '0' && unsigned <= '9') ||
+        unsigned == '-' || unsigned == '.' || unsigned == '_' || unsigned == '~'
+      ) result.append(unsigned.toChar)
+      else {
+        result.append('%')
+        result.append(hex.charAt(unsigned >>> 4))
+        result.append(hex.charAt(unsigned & 0x0f))
+      }
+    }
+    result.result()
+  }
   private def certificate(base64: String): X509Certificate =
     CertificateFactory
       .getInstance("X.509")
