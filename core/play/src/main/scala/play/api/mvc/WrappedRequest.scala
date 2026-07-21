@@ -11,6 +11,7 @@ import play.api.mvc.request.RequestAuthority
 import play.api.mvc.request.RequestTarget
 import play.api.mvc.request.Scheme
 import play.api.mvc.request.TransportConnection
+import play.api.mvc.request.XForwardedClientCert
 
 /**
  * Wrap an existing request. Useful to extend a request.
@@ -20,17 +21,18 @@ import play.api.mvc.request.TransportConnection
  * methods.
  */
 class WrappedRequest[+A](request: Request[A]) extends Request[A] {
-  override def transport: TransportConnection                   = request.transport
-  override def clientCertificate: Option[ClientCertificateInfo] = request.clientCertificate
-  override def scheme: Scheme                                   = request.scheme
-  override def authority: Option[RequestAuthority]              = request.authority
-  override def remote: RemoteInfo                               = request.remote
-  override def method: String                                   = request.method
-  override def target: RequestTarget                            = request.target
-  override def version: String                                  = request.version
-  override def headers: Headers                                 = request.headers
-  override def body: A                                          = request.body
-  override def attrs: TypedMap                                  = request.attrs
+  override def transport: TransportConnection                             = request.transport
+  override def clientCertificate: Option[ClientCertificateInfo]           = request.clientCertificate
+  override def xForwardedClientCertificates: Vector[XForwardedClientCert] = request.xForwardedClientCertificates
+  override def scheme: Scheme                                             = request.scheme
+  override def authority: Option[RequestAuthority]                        = request.authority
+  override def remote: RemoteInfo                                         = request.remote
+  override def method: String                                             = request.method
+  override def target: RequestTarget                                      = request.target
+  override def version: String                                            = request.version
+  override def headers: Headers                                           = request.headers
+  override def body: A                                                    = request.body
+  override def attrs: TypedMap                                            = request.attrs
 
   /**
    * Create a copy of this wrapper, but wrapping a new request.
@@ -45,6 +47,10 @@ class WrappedRequest[+A](request: Request[A]) extends Request[A] {
     newWrapper(request.withTransport(newTransport))
   override def withClientCertificate(newClientCertificate: Option[ClientCertificateInfo]): WrappedRequest[A] =
     newWrapper(request.withClientCertificate(newClientCertificate))
+  override def withXForwardedClientCertificates(
+      newXForwardedClientCertificates: Seq[XForwardedClientCert]
+  ): WrappedRequest[A] =
+    newWrapper(request.withXForwardedClientCertificates(newXForwardedClientCertificates))
   override def withScheme(newScheme: Scheme): WrappedRequest[A] =
     newWrapper(request.withScheme(newScheme))
   override def withAuthority(newAuthority: Option[RequestAuthority]): WrappedRequest[A] =

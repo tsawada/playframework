@@ -55,6 +55,7 @@ class ServerResultUtilsSpec extends Specification {
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       transport,
       None,
+      Vector.empty,
       remote,
       Scheme.Http,
       None,

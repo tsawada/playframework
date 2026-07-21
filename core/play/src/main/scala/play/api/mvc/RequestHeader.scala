@@ -40,7 +40,8 @@ trait RequestHeader {
       newTransport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /** The effective X.509 client certificate selected for this request, if present. */
@@ -58,8 +59,32 @@ trait RequestHeader {
       transport,
       newClientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
+
+  /** Accepted `X-Forwarded-Client-Cert` assertions in client-to-Play order. */
+  def xForwardedClientCertificates: Vector[XForwardedClientCert]
+
+  /** Return a copy with a different ordered sequence of accepted XFCC assertions. */
+  def withXForwardedClientCertificates(
+      newXForwardedClientCertificates: Seq[XForwardedClientCert]
+  ): RequestHeader = {
+    require(newXForwardedClientCertificates != null, "The XFCC assertion sequence must not be null")
+    new RequestHeaderImpl(
+      remote,
+      method,
+      target,
+      version,
+      headers,
+      attrs,
+      transport,
+      clientCertificate,
+      scheme,
+      authority,
+      newXForwardedClientCertificates.toVector
+    )
+  }
 
   /**
    * The normalized effective request scheme.
@@ -80,7 +105,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       newScheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -106,7 +132,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      newAuthority
+      newAuthority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -126,7 +153,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -153,7 +181,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -178,7 +207,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -216,7 +246,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -246,7 +277,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /** Whether the effective request scheme is HTTPS. */
@@ -275,7 +307,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -451,7 +484,8 @@ trait RequestHeader {
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
 
   /**
@@ -773,7 +807,8 @@ private[play] class RequestHeaderImpl(
     override val transport: TransportConnection,
     override val clientCertificate: Option[ClientCertificateInfo],
     override val scheme: Scheme,
-    override val authority: Option[RequestAuthority]
+    override val authority: Option[RequestAuthority],
+    override val xForwardedClientCertificates: Vector[XForwardedClientCert] = Vector.empty
 ) extends RequestHeader {
   require(remote != null, "Selected remote metadata must not be null")
   require(transport != null, "Direct transport metadata must not be null")
@@ -785,6 +820,10 @@ private[play] class RequestHeaderImpl(
   require(
     authority != null && authority.forall(_ != null),
     "Effective request authority option must not be null or contain null"
+  )
+  require(
+    xForwardedClientCertificates != null && xForwardedClientCertificates.forall(_ != null),
+    "The XFCC assertion sequence must not be null or contain null"
   )
 
   override val headers: Headers = RequestHeader.canonicalHeaders(requestHeaders, authority)

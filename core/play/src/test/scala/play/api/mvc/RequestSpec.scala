@@ -151,6 +151,7 @@ class RequestSpec extends Specification {
     new DefaultRequestFactory(HttpConfiguration()).createRequest(
       transport = transport,
       clientCertificate = None,
+      xForwardedClientCertificates = Vector.empty,
       remote = remote,
       scheme = RequestHeader.initialScheme(transport),
       authority = authority,

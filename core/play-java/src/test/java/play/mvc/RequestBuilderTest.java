@@ -299,6 +299,39 @@ public class RequestBuilderTest {
   }
 
   @Test
+  public void testXForwardedClientCertificatesAreOrderedBuilderState() {
+    Http.XForwardedClientCert client =
+        new Http.XForwardedClientCert(
+            List.of("spiffe://example/edge"),
+            Optional.empty(),
+            Optional.empty(),
+            List.of(),
+            Optional.empty(),
+            List.of("spiffe://example/client"),
+            List.of("client.example"));
+    Http.XForwardedClientCert proxy =
+        new Http.XForwardedClientCert(
+            List.of("spiffe://example/sidecar"),
+            Optional.empty(),
+            Optional.empty(),
+            List.of(),
+            Optional.empty(),
+            List.of("spiffe://example/proxy"),
+            List.of());
+    List<Http.XForwardedClientCert> mutableAssertions = new ArrayList<>(List.of(client, proxy));
+
+    Request request = new RequestBuilder().xForwardedClientCertificates(mutableAssertions).build();
+    mutableAssertions.clear();
+
+    assertEquals(List.of(client, proxy), request.xForwardedClientCertificates());
+    assertEquals(2, request.asScala().xForwardedClientCertificates().size());
+    assertEquals(client, request.asScala().xForwardedClientCertificates().apply(0).asJava());
+    assertThrows(
+        UnsupportedOperationException.class,
+        () -> request.xForwardedClientCertificates().add(client));
+  }
+
+  @Test
   public void testPathPreservesRawTargetAuthority() {
     RequestBuilder oversizedPort =
         new RequestBuilder()

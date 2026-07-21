@@ -36,6 +36,7 @@ class RequestHeaderSpec extends Specification {
     new DefaultRequestFactory(HttpConfiguration()).createRequestHeader(
       transport = transport,
       clientCertificate = None,
+      xForwardedClientCertificates = Vector.empty,
       remote = remote,
       scheme = Scheme.Http,
       authority = RequestHeader

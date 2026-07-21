@@ -22,6 +22,7 @@ trait RequestFactory {
   def createRequestHeader(
       transport: TransportConnection,
       clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -41,6 +42,7 @@ trait RequestFactory {
     createRequestHeader(
       rh.transport,
       rh.clientCertificate,
+      rh.xForwardedClientCertificates,
       rh.remote,
       rh.scheme,
       rh.authority,
@@ -59,6 +61,7 @@ trait RequestFactory {
   def createRequest[A](
       transport: TransportConnection,
       clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -72,6 +75,7 @@ trait RequestFactory {
     createRequestHeader(
       transport,
       clientCertificate,
+      xForwardedClientCertificates,
       remote,
       scheme,
       authority,
@@ -93,6 +97,7 @@ trait RequestFactory {
     createRequest[A](
       r.transport,
       r.clientCertificate,
+      r.xForwardedClientCertificates,
       r.remote,
       r.scheme,
       r.authority,
@@ -116,6 +121,7 @@ object RequestFactory {
     override def createRequestHeader(
         transport: TransportConnection,
         clientCertificate: Option[ClientCertificateInfo],
+        xForwardedClientCertificates: Vector[XForwardedClientCert],
         remote: RemoteInfo,
         scheme: Scheme,
         authority: Option[RequestAuthority],
@@ -135,7 +141,8 @@ object RequestFactory {
         transport,
         clientCertificate,
         scheme,
-        authority
+        authority,
+        xForwardedClientCertificates
       )
   }
 }
@@ -162,6 +169,7 @@ class DefaultRequestFactory @Inject() (
   override def createRequestHeader(
       transport: TransportConnection,
       clientCertificate: Option[ClientCertificateInfo],
+      xForwardedClientCertificates: Vector[XForwardedClientCert],
       remote: RemoteInfo,
       scheme: Scheme,
       authority: Option[RequestAuthority],
@@ -203,7 +211,8 @@ class DefaultRequestFactory @Inject() (
       transport,
       clientCertificate,
       scheme,
-      authority
+      authority,
+      xForwardedClientCertificates
     )
   }
 }
