@@ -134,6 +134,8 @@ play.server.websocket.compression.enabled = false
 
 Common compression settings are available under `play.server.websocket.compression`. These settings include the compression level, the preferred client window size, context-takeover behavior, and the maximum decompression allocation. By default, `play.server.websocket.compression.maxAllocation` uses `play.server.websocket.frame.maxLength`, so the same limit applies to decompressed WebSocket messages. The Netty backend also has Netty-specific settings under `play.server.netty.websocket.compression.perMessageDeflate`, including `allowServerWindowSize`, `serverWindowSize`, and `memLevel`.
 
+Applications can also disable compression for a single accepted WebSocket by returning `WebSocket.Accepted` with `compressionEnabled = false` from `acceptWithOptions` or `acceptOrResultWithOptions`. This lets an application keep compression enabled globally but decline it for endpoints that carry sensitive data or are expected to exchange already-compressed messages.
+
 > **Note:** WebSocket compression can increase CPU and memory usage. If messages include secrets alongside attacker-controlled data, consider whether compression is appropriate for that endpoint. Under the `play.server.websocket` config parent, the default context-takeover settings are `compression.perMessageDeflate.allowServerNoContext = false` and `compression.perMessageDeflate.preferredClientNoContext = false`. For a more conservative setup, set them to `true` so the server may accept `server_no_context_takeover` when the client requests it, and so the server requests `client_no_context_takeover` when the client supports it.
 
 ## Configuring keep-alive Frames

@@ -18,6 +18,7 @@ import io.netty.channel._
 import io.netty.handler.codec.http._
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory
 import io.netty.handler.codec.TooLongFrameException
+import io.netty.util.AttributeKey
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.util.ByteString
 import org.playframework.netty.http.DefaultWebSocketHttpResponse
@@ -37,6 +38,11 @@ import play.core.server.Server
 
 private object PlayRequestHandler {
   private val logger: Logger = Logger(classOf[PlayRequestHandler])
+}
+
+private[server] object PlayWebSocketCompression {
+  val Enabled: AttributeKey[java.lang.Boolean] =
+    AttributeKey.valueOf[java.lang.Boolean]("play.websocket.compressionEnabled")
 }
 
 private[play] class PlayRequestHandler(
@@ -217,8 +223,14 @@ private[play] class PlayRequestHandler(
                 )
               val factory =
                 new WebSocketServerHandshakerFactory(wsUrl, accepted.subprotocol.orNull, true, wsBufferLimit)
+              channel.attr(PlayWebSocketCompression.Enabled).set(java.lang.Boolean.valueOf(accepted.compressionEnabled))
               Future.successful(
-                new DefaultWebSocketHttpResponse(request.protocolVersion(), HttpResponseStatus.OK, processor, factory)
+                new DefaultWebSocketHttpResponse(
+                  request.protocolVersion(),
+                  HttpResponseStatus.OK,
+                  processor,
+                  factory
+                )
               )
           }
           .recoverWith {

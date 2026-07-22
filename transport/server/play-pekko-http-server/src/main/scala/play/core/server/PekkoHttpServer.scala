@@ -445,6 +445,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
                   accepted.flow,
                   wsBufferLimit,
                   accepted.subprotocol,
+                  accepted.compressionEnabled,
                   wsKeepAliveMode,
                   wsKeepAliveMaxIdle
                 )

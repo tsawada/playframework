@@ -63,6 +63,15 @@ public class WebSocketSpecJavaActions {
                 Flow.fromSinkAndSource(Sink.ignore(), Source.empty()), "graphql-transport-ws"));
   }
 
+  public static WebSocket selectSubprotocolWithoutCompression() {
+    return WebSocket.Text.acceptWithOptions(
+        request ->
+            new WebSocket.Accepted<>(
+                Flow.fromSinkAndSource(Sink.ignore(), Source.single("plain server message")),
+                "graphql-transport-ws",
+                false));
+  }
+
   public static WebSocket acceptText() {
     return WebSocket.Text.accept(request -> Flow.fromSinkAndSource(Sink.ignore(), emptySource()));
   }

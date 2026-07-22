@@ -218,7 +218,8 @@ object HandlerInvokerFactory {
                             case close: JMessage.Close   =>
                               CloseMessage(close.code.toScala.asInstanceOf[Option[Int]], close.reason)
                           },
-                        accepted.subprotocol().toScala
+                        accepted.subprotocol().toScala,
+                        accepted.compressionEnabled()
                       )
                     )
                   }

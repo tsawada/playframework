@@ -312,7 +312,13 @@ class NettyServer(
             nettyPerMessageDeflateConfig.get[Int]("memLevel"),
             maxAllocation
           )
-        )
+        ) {
+          protected override def isExtensionNegotiationEnabled(
+              ctx: ChannelHandlerContext,
+              response: HttpResponse
+          ): Boolean =
+            Option(ctx.channel().attr(PlayWebSocketCompression.Enabled).get()).forall(_.booleanValue())
+        }
       )
     }
   }
