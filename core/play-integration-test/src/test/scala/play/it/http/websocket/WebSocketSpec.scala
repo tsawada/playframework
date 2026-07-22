@@ -130,6 +130,57 @@ trait WebSocketCompressionSpec extends WebSocketSpecMethods {
       }
     }
 
+    "compress only outbound messages above the configured threshold" in {
+      val exactText        = "12345"
+      val utf8Text         = "\u20ac\u20ac"
+      val exactBinary      = ByteString(1, 2, 3, 4, 5)
+      val overBinary       = ByteString(1, 2, 3, 4, 5, 6)
+      val outboundMessages = List[Message](
+        TextMessage(exactText),
+        TextMessage(utf8Text),
+        BinaryMessage(exactBinary),
+        BinaryMessage(overBinary)
+      )
+
+      withServer(
+        app =>
+          WebSocket.accept[Message, Message] { req =>
+            Flow.fromSinkAndSource(Sink.ignore, Source(outboundMessages))
+          },
+        Map(
+          "play.server.websocket.compression.threshold"                              -> "5 bytes",
+          "play.server.websocket.compression.perMessageDeflate.allowServerNoContext" -> true
+        )
+      ) { (app, port) =>
+        import app.materializer
+        val frames = runWebSocket(
+          port,
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+          compressionMode = CompressionMode.RequestOnly("permessage-deflate; server_no_context_takeover")
+        )
+
+        val dataFrames = frames.collect {
+          case frame @ SimpleMessage(_: TextMessage, _)     => frame
+          case frame @ SimpleMessage(_: BinaryMessage, _)   => frame
+          case frame @ RawWebSocketFrame("text", _, _, _)   => frame
+          case frame @ RawWebSocketFrame("binary", _, _, _) => frame
+        }
+
+        dataFrames must beLike {
+          case List(
+                SimpleMessage(TextMessage(`exactText`), true),
+                RawWebSocketFrame("text", compressedText, textRsv, true),
+                SimpleMessage(BinaryMessage(`exactBinary`), true),
+                RawWebSocketFrame("binary", compressedBinary, binaryRsv, true)
+              ) =>
+            (textRsv must_== 4)
+              .and(inflatePerMessageDeflate(compressedText).utf8String must_== utf8Text)
+              .and(binaryRsv must_== 4)
+              .and(inflatePerMessageDeflate(compressedBinary) must_== overBinary)
+        }
+      }
+    }
+
     "not negotiate compression when websocket compression is disabled" in {
       withServer(
         app =>

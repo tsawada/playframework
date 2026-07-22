@@ -37,6 +37,7 @@ object WebSocketHandler {
       bufferLimit: Int,
       subprotocol: Option[String],
       compressionEnabled: Boolean,
+      compressionThreshold: Long,
       wsKeepAliveMode: String,
       wsKeepAliveMaxIdle: Duration,
   ): HttpResponse = upgrade match {
@@ -44,7 +45,8 @@ object WebSocketHandler {
       lowLevel.handleFrames(
         messageFlowToFrameFlow(flow, bufferLimit, wsKeepAliveMode, wsKeepAliveMaxIdle),
         subprotocol,
-        compressionEnabled
+        compressionEnabled,
+        _.data.length.toLong > compressionThreshold
       )
     case other =>
       throw new IllegalArgumentException("WebSocketUpgrade is not an Pekko HTTP UpgradeToWebsocketLowLevel")

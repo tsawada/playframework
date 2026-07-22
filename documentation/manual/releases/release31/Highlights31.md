@@ -22,7 +22,7 @@ Compression is enabled by default and is negotiated during the WebSocket handsha
 play.server.websocket.compression.enabled = false
 ```
 
-Common tuning options are available under `play.server.websocket.compression`, including the compression level, preferred client window size, context-takeover behavior, and the decompression allocation limit. By default, the allocation limit follows `play.server.websocket.frame.maxLength`. The Netty backend also exposes Netty-specific settings under `play.server.netty.websocket.compression.perMessageDeflate`, including `allowServerWindowSize`, `serverWindowSize`, and `memLevel`.
+Common tuning options are available under `play.server.websocket.compression`, including an outbound message-size threshold, the compression level, preferred client window size, context-takeover behavior, and the decompression allocation limit. By default, the allocation limit follows `play.server.websocket.frame.maxLength`. The Netty backend also exposes Netty-specific settings under `play.server.netty.websocket.compression.perMessageDeflate`, including `allowServerWindowSize`, `serverWindowSize`, and `memLevel`.
 
 Applications can also keep compression enabled globally and disable it for a single accepted WebSocket by returning `WebSocket.Accepted` with `compressionEnabled = false`.
 
