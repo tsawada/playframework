@@ -72,6 +72,17 @@ public class WebSocketSpecJavaActions {
                 false));
   }
 
+  public static WebSocket selectMessagesForCompression() {
+    return WebSocket.Text.acceptWithOptions(
+        request ->
+            new WebSocket.Accepted<>(
+                Flow.fromSinkAndSource(Sink.ignore(), Source.from(List.of("\u20ac", "123456"))),
+                context ->
+                    context.message() instanceof play.http.websocket.Message.Text
+                        && context.payloadLength() == 3
+                        && !context.isAboveCompressionThreshold()));
+  }
+
   public static WebSocket acceptText() {
     return WebSocket.Text.accept(request -> Flow.fromSinkAndSource(Sink.ignore(), emptySource()));
   }

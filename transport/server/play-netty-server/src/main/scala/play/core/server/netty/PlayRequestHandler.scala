@@ -50,6 +50,7 @@ private[play] class PlayRequestHandler(
     val serverHeader: Option[String],
     val maxContentLength: Long,
     val wsBufferLimit: Int,
+    val wsCompressionThreshold: Long,
     val wsKeepAliveMode: String,
     val wsKeepAliveMaxIdle: Duration,
     val deferBodyParsingGlobal: Boolean
@@ -219,6 +220,8 @@ private[play] class PlayRequestHandler(
                 WebSocketHandler.messageFlowToFrameProcessor(
                   accepted.flow,
                   wsBufferLimit,
+                  wsCompressionThreshold,
+                  accepted.shouldCompress,
                   wsKeepAliveMode,
                   wsKeepAliveMaxIdle
                 )

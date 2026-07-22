@@ -181,11 +181,161 @@ trait WebSocketCompressionSpec extends WebSocketSpecMethods {
       }
     }
 
+    "allow the application to override the compression threshold for each outbound message" in {
+      val belowText            = "\u20ac"
+      val aboveText            = "123456"
+      val belowBinary          = ByteString(1, 2, 3)
+      val aboveBinary          = ByteString(1, 2, 3, 4, 5, 6)
+      val compressibleMessages = List[Message](
+        TextMessage(belowText),
+        TextMessage(aboveText),
+        BinaryMessage(belowBinary),
+        BinaryMessage(aboveBinary)
+      )
+      val outboundMessages = compressibleMessages.patch(2, Seq(PingMessage(ByteString("ping"))), 0)
+      val observedContexts = new AtomicReference(Vector.empty[(Message, Long, Boolean)])
+
+      withServer(
+        app =>
+          WebSocket.acceptWithOptions[Message, Message] { req =>
+            WebSocket.Accepted(
+              Flow.fromSinkAndSource(Sink.ignore, Source(outboundMessages)),
+              shouldCompress = context => {
+                observedContexts.synchronized {
+                  observedContexts.set(
+                    observedContexts.get() :+ (
+                      context.message,
+                      context.payloadLength,
+                      context.isAboveCompressionThreshold
+                    )
+                  )
+                }
+                context.payloadLength == 3
+              }
+            )
+          },
+        Map(
+          "play.server.websocket.compression.threshold"                              -> "5 bytes",
+          "play.server.websocket.compression.perMessageDeflate.allowServerNoContext" -> true
+        )
+      ) { (app, port) =>
+        import app.materializer
+        val frames = runWebSocket(
+          port,
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+          compressionMode = CompressionMode.RequestOnly("permessage-deflate; server_no_context_takeover")
+        )
+
+        val dataFrames = frames.collect {
+          case frame @ SimpleMessage(_: TextMessage, _)     => frame
+          case frame @ SimpleMessage(_: BinaryMessage, _)   => frame
+          case frame @ RawWebSocketFrame("text", _, _, _)   => frame
+          case frame @ RawWebSocketFrame("binary", _, _, _) => frame
+        }
+
+        val framesResult = dataFrames must beLike {
+          case List(
+                RawWebSocketFrame("text", compressedText, textRsv, true),
+                SimpleMessage(TextMessage(`aboveText`), true),
+                RawWebSocketFrame("binary", compressedBinary, binaryRsv, true),
+                SimpleMessage(BinaryMessage(`aboveBinary`), true)
+              ) =>
+            (textRsv must_== 4)
+              .and(inflatePerMessageDeflate(compressedText).utf8String must_== belowText)
+              .and(binaryRsv must_== 4)
+              .and(inflatePerMessageDeflate(compressedBinary) must_== belowBinary)
+        }
+        val contextsResult = observedContexts.get() must_== compressibleMessages.map { message =>
+          val length = message match {
+            case TextMessage(data)   => ByteString(data).length.toLong
+            case BinaryMessage(data) => data.length.toLong
+            case _                   => 0L
+          }
+          (message, length, length > 5)
+        }
+
+        framesResult.and(contextsResult).and(frames must contain(pingFrame(be_==("ping"))))
+      }
+    }
+
+    "not evaluate the message compression selector when compression was not negotiated" in {
+      val evaluated = new AtomicReference(false)
+      withServer(app =>
+        WebSocket.acceptWithOptions[String, String] { req =>
+          WebSocket.Accepted(
+            Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message")),
+            shouldCompress = _ => {
+              evaluated.set(true)
+              true
+            }
+          )
+        }
+      ) { (app, port) =>
+        import app.materializer
+        val frames = runWebSocket(
+          port,
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+          compressionMode = CompressionMode.Disabled
+        )
+
+        (frames.collectFirst {
+          case SimpleMessage(TextMessage(data), true) => data
+        } must beSome("plain server message")).and(evaluated.get() must beFalse)
+      }
+    }
+
+    "allow Java applications to select outbound messages for compression" in {
+      val javaWebSocket = WebSocketSpecJavaActions.selectMessagesForCompression()
+      val javaHandler   = play.core.routing.HandlerInvokerFactory.javaWebSocket
+        .createInvoker(
+          javaWebSocket,
+          HandlerDef(
+            javaWebSocket.getClass.getClassLoader,
+            "package",
+            "controller",
+            "method",
+            Nil,
+            "GET",
+            "/stream"
+          )
+        )
+        .call(javaWebSocket)
+      withServer(
+        _ => javaHandler,
+        Map(
+          "play.server.websocket.compression.threshold"                              -> "5 bytes",
+          "play.server.websocket.compression.perMessageDeflate.allowServerNoContext" -> true
+        )
+      ) { (app, port) =>
+        import app.materializer
+        val frames = runWebSocket(
+          port,
+          { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+          compressionMode = CompressionMode.RequestOnly("permessage-deflate; server_no_context_takeover")
+        )
+
+        val dataFrames = frames.collect {
+          case frame @ SimpleMessage(_: TextMessage, _)   => frame
+          case frame @ RawWebSocketFrame("text", _, _, _) => frame
+        }
+        dataFrames must beLike {
+          case List(
+                RawWebSocketFrame("text", compressedText, rsv, true),
+                SimpleMessage(TextMessage("123456"), true)
+              ) =>
+            (rsv must_== 4).and(inflatePerMessageDeflate(compressedText).utf8String must_== "\u20ac")
+        }
+      }
+    }
+
     "not negotiate compression when websocket compression is disabled" in {
       withServer(
         app =>
-          WebSocket.accept[String, String] { req =>
-            Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message"))
+          WebSocket.acceptWithOptions[String, String] { req =>
+            WebSocket.Accepted(
+              Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message")),
+              shouldCompress = _ => throw new AssertionError("compression selector must not be evaluated")
+            )
           },
         Map("play.server.websocket.compression.enabled" -> false)
       ) { (app, port) =>
@@ -213,7 +363,8 @@ trait WebSocketCompressionSpec extends WebSocketSpecMethods {
         WebSocket.acceptWithOptions[String, String] { req =>
           WebSocket.Accepted(
             Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message")),
-            compressionEnabled = false
+            compressionEnabled = false,
+            shouldCompress = _ => throw new AssertionError("compression selector must not be evaluated")
           )
         }
       ) { (app, port) =>

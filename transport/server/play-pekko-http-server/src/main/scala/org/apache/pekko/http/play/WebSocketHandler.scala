@@ -38,6 +38,7 @@ object WebSocketHandler {
       subprotocol: Option[String],
       compressionEnabled: Boolean,
       compressionThreshold: Long,
+      compressionSelector: (() => Message, Long, Boolean) => Boolean,
       wsKeepAliveMode: String,
       wsKeepAliveMaxIdle: Duration,
   ): HttpResponse = upgrade match {
@@ -46,7 +47,15 @@ object WebSocketHandler {
         messageFlowToFrameFlow(flow, bufferLimit, wsKeepAliveMode, wsKeepAliveMaxIdle),
         subprotocol,
         compressionEnabled,
-        _.data.length.toLong > compressionThreshold
+        frame => {
+          val message: () => Message = frame.header.opcode match {
+            case Protocol.Opcode.Text   => () => TextMessage(frame.data.utf8String)
+            case Protocol.Opcode.Binary => () => BinaryMessage(frame.data)
+            case opcode                 => throw new IllegalArgumentException(s"Cannot compress $opcode WebSocket frame")
+          }
+          val payloadLength = frame.data.length.toLong
+          compressionSelector(message, payloadLength, payloadLength > compressionThreshold)
+        }
       )
     case other =>
       throw new IllegalArgumentException("WebSocketUpgrade is not an Pekko HTTP UpgradeToWebsocketLowLevel")

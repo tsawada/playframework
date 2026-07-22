@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.apache.pekko.stream.javadsl.Flow;
 import org.apache.pekko.util.ByteString;
 import play.api.http.websocket.CloseCodes;
@@ -148,6 +150,48 @@ public abstract class WebSocket {
   }
 
   /**
+   * Information about an outbound WebSocket message for which Play is deciding whether to use
+   * compression.
+   *
+   * @since 3.1.0
+   */
+  public static final class CompressionContext {
+    private final Supplier<Message> message;
+    private final long payloadLength;
+    private final boolean isAboveCompressionThreshold;
+
+    public CompressionContext(
+        Message message, long payloadLength, boolean isAboveCompressionThreshold) {
+      this(() -> message, payloadLength, isAboveCompressionThreshold);
+    }
+
+    public CompressionContext(
+        Supplier<Message> message, long payloadLength, boolean isAboveCompressionThreshold) {
+      this.message = F.LazySupplier.lazy(message);
+      this.payloadLength = payloadLength;
+      this.isAboveCompressionThreshold = isAboveCompressionThreshold;
+    }
+
+    /** Returns the final Play WebSocket message after applying the configured message mapper. */
+    public Message message() {
+      return message.get();
+    }
+
+    /** Returns the uncompressed payload length in bytes, after UTF-8 encoding for text messages. */
+    public long payloadLength() {
+      return payloadLength;
+    }
+
+    /** Returns whether the payload length is greater than the configured compression threshold. */
+    public boolean isAboveCompressionThreshold() {
+      return isAboveCompressionThreshold;
+    }
+  }
+
+  private static final Predicate<CompressionContext> DEFAULT_SHOULD_COMPRESS =
+      CompressionContext::isAboveCompressionThreshold;
+
+  /**
    * An accepted WebSocket, including the flow that handles WebSocket messages and optional
    * handshake metadata.
    *
@@ -158,12 +202,29 @@ public abstract class WebSocket {
     private final Flow<In, Out, ?> flow;
     private final Optional<String> subprotocol;
     private final boolean compressionEnabled;
+    private final Predicate<CompressionContext> shouldCompress;
 
     public Accepted(
-        Flow<In, Out, ?> flow, Optional<String> subprotocol, boolean compressionEnabled) {
+        Flow<In, Out, ?> flow,
+        Optional<String> subprotocol,
+        boolean compressionEnabled,
+        Predicate<CompressionContext> shouldCompress) {
       this.flow = flow;
       this.subprotocol = subprotocol;
       this.compressionEnabled = compressionEnabled;
+      this.shouldCompress = shouldCompress;
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow, Optional<String> subprotocol, boolean compressionEnabled) {
+      this(flow, subprotocol, compressionEnabled, DEFAULT_SHOULD_COMPRESS);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        Optional<String> subprotocol,
+        Predicate<CompressionContext> shouldCompress) {
+      this(flow, subprotocol, true, shouldCompress);
     }
 
     public Accepted(Flow<In, Out, ?> flow, Optional<String> subprotocol) {
@@ -178,12 +239,36 @@ public abstract class WebSocket {
       this(flow, Optional.of(subprotocol), compressionEnabled);
     }
 
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        String subprotocol,
+        boolean compressionEnabled,
+        Predicate<CompressionContext> shouldCompress) {
+      this(flow, Optional.of(subprotocol), compressionEnabled, shouldCompress);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow, String subprotocol, Predicate<CompressionContext> shouldCompress) {
+      this(flow, Optional.of(subprotocol), true, shouldCompress);
+    }
+
     public Accepted(Flow<In, Out, ?> flow) {
       this(flow, Optional.empty());
     }
 
     public Accepted(Flow<In, Out, ?> flow, boolean compressionEnabled) {
       this(flow, Optional.empty(), compressionEnabled);
+    }
+
+    public Accepted(
+        Flow<In, Out, ?> flow,
+        boolean compressionEnabled,
+        Predicate<CompressionContext> shouldCompress) {
+      this(flow, Optional.empty(), compressionEnabled, shouldCompress);
+    }
+
+    public Accepted(Flow<In, Out, ?> flow, Predicate<CompressionContext> shouldCompress) {
+      this(flow, Optional.empty(), true, shouldCompress);
     }
 
     public Flow<In, Out, ?> flow() {
@@ -207,6 +292,16 @@ public abstract class WebSocket {
      */
     public boolean compressionEnabled() {
       return compressionEnabled;
+    }
+
+    /**
+     * Returns the selector for outbound text and binary messages after compression is negotiated.
+     * Its result can override the configured compression threshold, but cannot enable compression
+     * when it is disabled globally, disabled for this accepted WebSocket, or not negotiated with
+     * the client. The selector must not block; an exception from it fails the WebSocket stream.
+     */
+    public Predicate<CompressionContext> shouldCompress() {
+      return shouldCompress;
     }
   }
 
@@ -349,7 +444,10 @@ public abstract class WebSocket {
                             accepted.flow().map(outMapper::apply));
                     return F.Either.Right(
                         new Accepted<>(
-                            flow, accepted.subprotocol(), accepted.compressionEnabled()));
+                            flow,
+                            accepted.subprotocol(),
+                            accepted.compressionEnabled(),
+                            accepted.shouldCompress()));
                   }
                 });
       }

@@ -138,6 +138,21 @@ The `play.server.websocket.compression.threshold` setting controls the minimum o
 play.server.websocket.compression.threshold = 1k
 ```
 
+An application can replace the threshold decision for an accepted WebSocket by providing a compression selector. The selector receives the final Play message, its uncompressed payload length, and the result of the configured threshold check. It can return `true` to compress a message below the threshold or `false` to send a message above it without compression:
+
+```java
+new WebSocket.Accepted<>(
+    flow,
+    context -> {
+      if (context.message() instanceof Message.Text text && text.data().contains("secret")) {
+        return false;
+      }
+      return context.isAboveCompressionThreshold();
+    });
+```
+
+The selector is called synchronously once for each outbound text or binary message, and only when `permessage-deflate` was negotiated. It must not block. Its result cannot enable compression when compression is disabled globally, disabled for the accepted WebSocket, or not negotiated with the client.
+
 Applications can also disable compression for a single accepted WebSocket by returning `new WebSocket.Accepted<>(flow, false)` from `acceptWithOptions` or `acceptOrResultWithOptions`. This lets an application keep compression enabled globally but decline it for endpoints that carry sensitive data or are expected to exchange already-compressed messages.
 
 > **Note:** WebSocket compression can increase CPU and memory usage. If messages include secrets alongside attacker-controlled data, consider whether compression is appropriate for that endpoint. Under the `play.server.websocket` config parent, the default context-takeover settings are `compression.perMessageDeflate.allowServerNoContext = false` and `compression.perMessageDeflate.preferredClientNoContext = false`. For a more conservative setup, set them to `true` so the server may accept `server_no_context_takeover` when the client requests it, and so the server requests `client_no_context_takeover` when the client supports it.

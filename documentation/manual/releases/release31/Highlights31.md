@@ -26,6 +26,8 @@ Common tuning options are available under `play.server.websocket.compression`, i
 
 Applications can also keep compression enabled globally and disable it for a single accepted WebSocket by returning `WebSocket.Accepted` with `compressionEnabled = false`.
 
+For finer control, `WebSocket.Accepted` accepts a per-message compression selector. The selector can use the final outbound message, its uncompressed payload length, and the configured threshold result to override the threshold for individual messages.
+
 For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Configuring-WebSocket-compression]] and [[Java WebSocket documentation|JavaWebSockets#Configuring-WebSocket-compression]].
 
 ### WebSocket Subprotocol Selection

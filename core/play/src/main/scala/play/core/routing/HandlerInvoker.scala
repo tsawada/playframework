@@ -191,6 +191,24 @@ object HandlerInvokerFactory {
 
         def call(wsCall: => JWebSocket): Handler = new JavaHandler {
           def withComponents(handlerComponents: JavaHandlerComponents): WebSocket = {
+            def toJavaMessage(message: Message): JMessage = message match {
+              case TextMessage(text)          => new JMessage.Text(text)
+              case BinaryMessage(data)        => new JMessage.Binary(data)
+              case PingMessage(data)          => new JMessage.Ping(data)
+              case PongMessage(data)          => new JMessage.Pong(data)
+              case CloseMessage(code, reason) =>
+                new JMessage.Close(code.toJava.asInstanceOf[Optional[Integer]], reason)
+            }
+
+            def toScalaMessage(message: JMessage): Message = message match {
+              case text: JMessage.Text     => TextMessage(text.data)
+              case binary: JMessage.Binary => BinaryMessage(binary.data)
+              case ping: JMessage.Ping     => PingMessage(ping.data)
+              case pong: JMessage.Pong     => PongMessage(pong.data)
+              case close: JMessage.Close   =>
+                CloseMessage(close.code.toScala.asInstanceOf[Option[Int]], close.reason)
+            }
+
             WebSocket.acceptOrResultWithOptions[Message, Message] { request =>
               def callWebSocketAction(req: RequestHeader) =
                 wsCall.applyWithOptions(req.asJava).asScala.map { resultOrAccepted =>
@@ -201,25 +219,21 @@ object HandlerInvokerFactory {
                     Right(
                       WebSocket.Accepted(
                         Flow[Message]
-                          .map[JMessage] {
-                            case TextMessage(text)          => new JMessage.Text(text)
-                            case BinaryMessage(data)        => new JMessage.Binary(data)
-                            case PingMessage(data)          => new JMessage.Ping(data)
-                            case PongMessage(data)          => new JMessage.Pong(data)
-                            case CloseMessage(code, reason) =>
-                              new JMessage.Close(code.toJava.asInstanceOf[Optional[Integer]], reason)
-                          }
+                          .map[JMessage](toJavaMessage)
                           .via(accepted.flow().asScala)
-                          .map[Message] {
-                            case text: JMessage.Text     => TextMessage(text.data)
-                            case binary: JMessage.Binary => BinaryMessage(binary.data)
-                            case ping: JMessage.Ping     => PingMessage(ping.data)
-                            case pong: JMessage.Pong     => PongMessage(pong.data)
-                            case close: JMessage.Close   =>
-                              CloseMessage(close.code.toScala.asInstanceOf[Option[Int]], close.reason)
-                          },
+                          .map[Message](toScalaMessage),
                         accepted.subprotocol().toScala,
-                        accepted.compressionEnabled()
+                        accepted.compressionEnabled(),
+                        context =>
+                          accepted
+                            .shouldCompress()
+                            .test(
+                              new JWebSocket.CompressionContext(
+                                () => toJavaMessage(context.message),
+                                context.payloadLength,
+                                context.isAboveCompressionThreshold
+                              )
+                            )
                       )
                     )
                   }

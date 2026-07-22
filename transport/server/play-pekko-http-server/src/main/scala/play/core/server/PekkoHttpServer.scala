@@ -452,6 +452,10 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
                     accepted.subprotocol,
                     accepted.compressionEnabled,
                     wsCompressionThreshold,
+                    (message, payloadLength, isAboveCompressionThreshold) =>
+                      accepted.shouldCompress(
+                        new WebSocket.CompressionContext(message(), payloadLength, isAboveCompressionThreshold)
+                      ),
                     wsKeepAliveMode,
                     wsKeepAliveMaxIdle
                   )
