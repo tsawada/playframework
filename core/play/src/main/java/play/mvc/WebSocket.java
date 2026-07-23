@@ -190,6 +190,13 @@ public abstract class WebSocket {
       return flow;
     }
 
+    /**
+     * Returns the WebSocket subprotocol selected by the application, if any.
+     *
+     * <p>The selected subprotocol must be one of the subprotocols offered by the client. Otherwise,
+     * Play passes the application error to its configured HTTP error handler, which returns an HTTP
+     * 500 response by default.
+     */
     public Optional<String> subprotocol() {
       return subprotocol;
     }

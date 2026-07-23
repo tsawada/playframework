@@ -28,6 +28,8 @@ import org.specs2.execute.EventuallyResults
 import org.specs2.matcher.Matcher
 import org.specs2.specification.AroundEach
 import play.api.http.websocket._
+import play.api.http.HttpErrorHandler
+import play.api.inject.bind
 import play.api.inject.guice.GuiceApplicationBuilder
 import play.api.libs.json.JsValue
 import play.api.libs.json.Json
@@ -35,6 +37,8 @@ import play.api.libs.json.Reads
 import play.api.libs.streams.ActorFlow
 import play.api.libs.ws.WSClient
 import play.api.mvc.Handler
+import play.api.mvc.RequestHeader
+import play.api.mvc.Result
 import play.api.mvc.Results
 import play.api.mvc.WebSocket
 import play.api.routing.HandlerDef
@@ -654,6 +658,54 @@ trait WebSocketSpec
         }
       }
 
+      "fail the handshake when the application selects a subprotocol not proposed by the client" in {
+        val handledError = Promise[Throwable]()
+        val errorHandler = new HttpErrorHandler {
+          override def onClientError(request: RequestHeader, statusCode: Int, message: String): Future[Result] = {
+            Future.successful(Results.Status(statusCode)(message))
+          }
+
+          override def onServerError(request: RequestHeader, exception: Throwable): Future[Result] = {
+            handledError.trySuccess(exception)
+            Future.successful(Results.ServiceUnavailable)
+          }
+        }
+        withServer(
+          app =>
+            WebSocket.acceptWithOptions[String, String] { req =>
+              WebSocket.Accepted(
+                Flow.fromSinkAndSource(Sink.ignore, Source(Nil)),
+                Some("not-offered")
+              )
+            },
+          errorHandler = Some(errorHandler)
+        ) { (app, port) =>
+          val status    = webSocketHandshakeStatus(app, port, Some("graphql-ws, graphql-transport-ws"))
+          val exception = await(handledError.future)
+
+          (status must_== SERVICE_UNAVAILABLE)
+            .and(exception must beAnInstanceOf[IllegalArgumentException])
+            .and(
+              exception.getMessage must_==
+                "The application selected WebSocket subprotocol 'not-offered', " +
+                "but the client offered [graphql-ws, graphql-transport-ws]"
+            )
+        }
+      }
+
+      "fail the handshake when the application selects a subprotocol but the client proposed none" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            WebSocket.Accepted(
+              Flow.fromSinkAndSource(Sink.ignore, Source(Nil)),
+              Some("not-offered")
+            )
+          }
+        ) { (app, port) =>
+          webSocketHandshakeStatus(app, port, None) must_== INTERNAL_SERVER_ERROR
+        }
+      }
+
       // we keep getting timeouts on this test
       // java.util.concurrent.TimeoutException: Futures timed out after [5 seconds] (Helpers.scala:186)
       "close the websocket when the wrong type of frame is received" in {
@@ -995,13 +1047,18 @@ trait WebSocketSpecMethods extends PlaySpecification with WsTestClient with Serv
   // Extend the default spec timeout for CI.
   implicit override def defaultAwaitTimeout: Timeout = 10.seconds
 
-  def withServer[A](webSocket: Application => Handler, extraConfig: Map[String, Any] = Map.empty)(
+  def withServer[A](
+      webSocket: Application => Handler,
+      extraConfig: Map[String, Any] = Map.empty,
+      errorHandler: Option[HttpErrorHandler] = None
+  )(
       block: (Application, Int) => A
   ): A = {
     val currentApp = new AtomicReference[Application]
     val config     = Configuration(ConfigFactory.parseMap(extraConfig.asJava))
-    val app        = GuiceApplicationBuilder()
-      .configure(config)
+    val builder    = GuiceApplicationBuilder().configure(config)
+    val app        = errorHandler
+      .fold(builder)(handler => builder.overrides(bind[HttpErrorHandler].to(handler)))
       .routes {
         case _ => webSocket(currentApp.get())
       }
@@ -1171,19 +1228,24 @@ trait WebSocketSpecMethods extends PlaySpecification with WsTestClient with Serv
 
   def allowRejectingTheWebSocketWithAResult(webSocket: Application => Int => Handler) = {
     withServer(app => webSocket(app)(FORBIDDEN)) { (app, port) =>
-      val ws = app.injector.instanceOf[WSClient]
-      await(
-        ws.url(s"http://localhost:$port/stream")
-          .addHttpHeaders(
-            "Upgrade"               -> "websocket",
-            "Connection"            -> "upgrade",
-            "Sec-WebSocket-Version" -> "13",
-            "Sec-WebSocket-Key"     -> "x3JJHMbDL1EzLkh9GBhXDw==",
-            "Origin"                -> "http://example.com"
-          )
-          .get()
-      ).status must_== FORBIDDEN
+      webSocketHandshakeStatus(app, port, None) must_== FORBIDDEN
     }
+  }
+
+  def webSocketHandshakeStatus(app: Application, port: Int, subprotocol: Option[String]): Int = {
+    val ws      = app.injector.instanceOf[WSClient]
+    val headers = Seq(
+      "Upgrade"               -> "websocket",
+      "Connection"            -> "upgrade",
+      "Sec-WebSocket-Version" -> "13",
+      "Sec-WebSocket-Key"     -> "x3JJHMbDL1EzLkh9GBhXDw==",
+      "Origin"                -> "http://example.com"
+    ) ++ subprotocol.map("Sec-WebSocket-Protocol" -> _)
+    await(
+      ws.url(s"http://localhost:$port/stream")
+        .addHttpHeaders(headers*)
+        .get()
+    ).status
   }
 
   def handleNonUpgradeRequestsGracefully(webSocket: Application => Handler) = {

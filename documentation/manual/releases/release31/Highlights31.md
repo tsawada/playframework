@@ -55,6 +55,8 @@ WebSocket.Text.acceptWithOptions(request ->
 
 This is useful for protocols where the client and server need to agree on an application-level WebSocket protocol during the opening handshake. Existing `accept` and `acceptOrResult` handlers keep their previous behavior.
 
+The selected subprotocol must be one offered by the client. Selecting any other value is an application error that Play passes to the configured `HttpErrorHandler` without completing the upgrade; the default response is HTTP 500.
+
 For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Selecting-a-WebSocket-subprotocol]] and [[Java WebSocket documentation|JavaWebSockets#Selecting-a-WebSocket-subprotocol]].
 
 ### WebSocket Abnormal Closure Status
