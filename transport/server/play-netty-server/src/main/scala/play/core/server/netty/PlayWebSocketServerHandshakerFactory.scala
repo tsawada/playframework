@@ -12,6 +12,10 @@ import io.netty.handler.codec.http.HttpHeaderNames
 import io.netty.handler.codec.http.HttpHeaders
 import io.netty.handler.codec.http.HttpRequest
 
+/**
+ * Supplies response headers through Netty's handshaker because netty-reactive-streams invokes the handshake overload
+ * without response headers.
+ */
 private[netty] final class PlayWebSocketServerHandshakerFactory(
     webSocketURL: String,
     subprotocols: String,

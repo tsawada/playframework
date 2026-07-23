@@ -85,9 +85,9 @@ WebSocket.Text.acceptWithOptions(request ->
     .addingToSession(request, "websocket", "connected"));
 ```
 
-This is useful for applications that need to attach handshake metadata, for example trace identifiers, cookies, or session updates, while still using Play's WebSocket handling. These headers, cookies, and session updates are sent only with the opening handshake response. Protocol-owned headers such as `Upgrade`, `Connection`, `Sec-WebSocket-Accept`, and `Sec-WebSocket-Protocol` remain controlled by Play and the selected `subprotocol`.
+This is useful for applications that need to attach handshake metadata, for example trace identifiers, cookies, or session updates, while still using Play's WebSocket handling. These headers, cookies, and session updates are sent only with the opening handshake response. Connection and framing headers, and all `Sec-WebSocket-*` headers, remain controlled by Play.
 
-For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]] and [[Java WebSocket documentation|JavaWebSockets#Setting-WebSocket-handshake-headers-and-cookies]].
+For more details, see the [[Scala WebSocket documentation|ScalaWebSockets#Setting-WebSocket-handshake-response-options]] and [[Java WebSocket documentation|JavaWebSockets#Setting-WebSocket-handshake-response-options]].
 
 ### WebSocket Abnormal Closure Status
 

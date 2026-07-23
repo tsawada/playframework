@@ -23,10 +23,12 @@ import java.util.stream.Stream;
 import org.apache.pekko.stream.javadsl.Flow;
 import org.apache.pekko.util.ByteString;
 import play.api.http.websocket.CloseCodes;
+import play.api.mvc.DiscardingCookie;
 import play.http.websocket.Message;
 import play.libs.F;
 import play.libs.Scala;
 import play.libs.streams.PekkoStreams;
+import scala.Option;
 import scala.PartialFunction;
 
 /** A WebSocket handler. */
@@ -311,7 +313,14 @@ public abstract class WebSocket {
       this.subprotocol = subprotocol;
       this.compressionEnabled = compressionEnabled;
       this.shouldCompress = shouldCompress;
-      this.headers = Collections.unmodifiableList(new ArrayList<>(headers));
+      this.headers =
+          Collections.unmodifiableList(
+              headers.stream()
+                  .map(
+                      header ->
+                          new AbstractMap.SimpleImmutableEntry<>(
+                              header.getKey(), header.getValue()))
+                  .collect(Collectors.toList()));
       this.cookies = Collections.unmodifiableList(new ArrayList<>(cookies));
       this.session = session;
     }
@@ -389,20 +398,27 @@ public abstract class WebSocket {
       return shouldCompress;
     }
 
+    /** Returns the application-supplied WebSocket handshake response headers. */
     public List<Map.Entry<String, String>> headers() {
       return headers;
     }
 
+    /** Returns the cookies to add to the WebSocket handshake response. */
     public List<Http.Cookie> cookies() {
       return cookies;
     }
 
+    /** Returns the session to add to the WebSocket handshake response, if one was set. */
     public Optional<Http.Session> session() {
       return Optional.ofNullable(session);
     }
 
     /**
-     * Return a copy of this accepted WebSocket with the given handshake response header.
+     * Return a copy of this accepted WebSocket with the given handshake response header added or
+     * replaced.
+     *
+     * <p>Connection and framing headers, and all {@code Sec-WebSocket-*} headers, are controlled by
+     * Play and will not be sent.
      *
      * @param name the header name
      * @param value the header value
@@ -410,13 +426,17 @@ public abstract class WebSocket {
      */
     public Accepted<In, Out> withHeader(String name, String value) {
       List<Map.Entry<String, String>> newHeaders = new ArrayList<>(headers);
-      newHeaders.add(new AbstractMap.SimpleImmutableEntry<>(name, value));
+      replaceHeader(newHeaders, name, value);
       return new Accepted<>(
           flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies, session);
     }
 
     /**
-     * Return a copy of this accepted WebSocket with the given handshake response headers.
+     * Return a copy of this accepted WebSocket with the given handshake response headers added or
+     * replaced.
+     *
+     * <p>Connection and framing headers, and all {@code Sec-WebSocket-*} headers, are controlled by
+     * Play and will not be sent.
      *
      * <p>The headers are processed in pairs, so nameValues(0) is the first header's name, and
      * nameValues(1) is the first header's value, nameValues(2) is second header's name, and so on.
@@ -432,10 +452,16 @@ public abstract class WebSocket {
 
       List<Map.Entry<String, String>> newHeaders = new ArrayList<>(headers);
       for (int i = 0; i < nameValues.length; i += 2) {
-        newHeaders.add(new AbstractMap.SimpleImmutableEntry<>(nameValues[i], nameValues[i + 1]));
+        replaceHeader(newHeaders, nameValues[i], nameValues[i + 1]);
       }
       return new Accepted<>(
           flow, subprotocol, compressionEnabled, shouldCompress, newHeaders, cookies, session);
+    }
+
+    private static void replaceHeader(
+        List<Map.Entry<String, String>> headers, String name, String value) {
+      headers.removeIf(header -> header.getKey().equalsIgnoreCase(name));
+      headers.add(new AbstractMap.SimpleImmutableEntry<>(name, value));
     }
 
     /**
@@ -504,7 +530,77 @@ public abstract class WebSocket {
      * @param domain The domain of the cookie to discard, may be null
      */
     public Accepted<In, Out> discardingCookie(String name, String path, String domain) {
-      return withCookies(new Http.Cookie(name, "", 0, path, domain, false, true, null, false));
+      return discardingCookie(name, path, domain, false);
+    }
+
+    /**
+     * Discard a cookie in this WebSocket upgrade response.
+     *
+     * @param name The name of the cookie to discard, must not be null
+     * @param path The path of the cookie to discard, may be null
+     * @param domain The domain of the cookie to discard, may be null
+     * @param secure Whether the cookie to discard is secure
+     */
+    public Accepted<In, Out> discardingCookie(
+        String name, String path, String domain, boolean secure) {
+      return discardingCookie(name, path, domain, secure, false);
+    }
+
+    /**
+     * Discard a cookie in this WebSocket upgrade response.
+     *
+     * @param name The name of the cookie to discard, must not be null
+     * @param path The path of the cookie to discard, may be null
+     * @param domain The domain of the cookie to discard, may be null
+     * @param secure Whether the cookie to discard is secure
+     * @param partitioned Whether the cookie to discard is partitioned
+     */
+    public Accepted<In, Out> discardingCookie(
+        String name, String path, String domain, boolean secure, boolean partitioned) {
+      return discardingCookie(name, path, domain, secure, null, partitioned);
+    }
+
+    /**
+     * Discard a cookie in this WebSocket upgrade response.
+     *
+     * @param name The name of the cookie to discard, must not be null
+     * @param path The path of the cookie to discard, may be null
+     * @param domain The domain of the cookie to discard, may be null
+     * @param secure Whether the cookie to discard is secure
+     * @param sameSite The SameSite attribute of the cookie to discard, may be null
+     */
+    public Accepted<In, Out> discardingCookie(
+        String name, String path, String domain, boolean secure, Http.Cookie.SameSite sameSite) {
+      return discardingCookie(name, path, domain, secure, sameSite, false);
+    }
+
+    /**
+     * Discard a cookie in this WebSocket upgrade response.
+     *
+     * @param name The name of the cookie to discard, must not be null
+     * @param path The path of the cookie to discard, may be null
+     * @param domain The domain of the cookie to discard, may be null
+     * @param secure Whether the cookie to discard is secure
+     * @param sameSite The SameSite attribute of the cookie to discard, may be null
+     * @param partitioned Whether the cookie to discard is partitioned
+     */
+    public Accepted<In, Out> discardingCookie(
+        String name,
+        String path,
+        String domain,
+        boolean secure,
+        Http.Cookie.SameSite sameSite,
+        boolean partitioned) {
+      return withCookies(
+          new DiscardingCookie(
+                  name,
+                  path,
+                  Option.apply(domain),
+                  secure,
+                  Option.apply(sameSite).map(Http.Cookie.SameSite::asScala),
+                  partitioned)
+              .toCookie()
+              .asJava());
     }
 
     /**

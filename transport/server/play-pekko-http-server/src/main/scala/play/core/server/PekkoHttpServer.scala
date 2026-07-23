@@ -445,14 +445,7 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
               WebSocket.validateSubprotocol(taggedRequestHeader, accepted.subprotocol)
               val handshakeHeaders = resultUtils(tryApp)
                 .prepareWebSocketHandshakeHeaders(accepted)
-                .flatMap {
-                  case (HeaderNames.SET_COOKIE, value) =>
-                    resultUtils(tryApp).splitSetCookieHeaderValue(value).map(headers.RawHeader(HeaderNames.SET_COOKIE, _))
-                  case (name, value) =>
-                    resultUtils(tryApp).validateHeaderNameChars(name)
-                    resultUtils(tryApp).validateHeaderValueChars(value)
-                    headers.RawHeader(name, value) :: Nil
-                }
+                .map { case (name, value) => headers.RawHeader(name, value) }
               val response = WebSocketHandler
                 .handleWebSocket(
                   upgrade,

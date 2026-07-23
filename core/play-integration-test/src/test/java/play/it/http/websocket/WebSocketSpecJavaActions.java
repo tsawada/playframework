@@ -105,10 +105,20 @@ public class WebSocketSpecJavaActions {
     return WebSocket.Text.acceptWithOptions(
         request -> {
           Flow<String, String, ?> flow =
-              Flow.fromSinkAndSource(Sink.ignore(), Source.<String>empty());
-          return new WebSocket.Accepted<>(flow)
-              .withHeader("X-WebSocket-Trace", "java-trace")
+              Flow.fromSinkAndSource(Sink.ignore(), Source.single("plain server message"));
+          return new WebSocket.Accepted<>(flow, "graphql-transport-ws", false)
+              .withHeaders(
+                  "X-WebSocket-Trace",
+                  "discarded",
+                  "x-websocket-trace",
+                  "java-trace",
+                  "X-Remove",
+                  "remove",
+                  "Set-Cookie",
+                  "java-raw-cookie=raw-value; Path=/")
+              .withoutHeader("x-remove")
               .withCookies(Http.Cookie.builder("java-ws-cookie", "cookie-value").build())
+              .discardingCookie("java-expired", "/", null, true, Http.Cookie.SameSite.LAX, true)
               .addingToSession(request, "websocket", "connected");
         });
   }

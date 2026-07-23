@@ -313,11 +313,22 @@ private[play] final class ServerResultUtils(
   }
 
   /**
-   * Bake cookies and return the headers that may be added to a WebSocket upgrade response.
+   * Bake cookies and return validated headers that may be added to a WebSocket upgrade response.
    */
   def prepareWebSocketHandshakeHeaders(accepted: WebSocket.Accepted[?, ?]): Seq[(String, String)] = {
     val baked = accepted.bakeCookies(cookieHeaderEncoding, sessionBaker)
-    WebSocket.allowedHandshakeResponseHeaders(baked.headers)
+    WebSocket
+      .allowedHandshakeResponseHeaders(baked.headers)
+      .flatMap {
+        case (name, value) if name.equalsIgnoreCase(SET_COOKIE) =>
+          splitSetCookieHeaderValue(value).map(SET_COOKIE -> _)
+        case header => header :: Nil
+      }
+      .map { header =>
+        validateHeaderNameChars(header._1)
+        validateHeaderValueChars(header._2)
+        header
+      }
   }
 
   /**

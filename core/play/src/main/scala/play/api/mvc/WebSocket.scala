@@ -60,9 +60,8 @@ object WebSocket {
 
   private val ReservedHandshakeResponseHeaders = Set(
     "connection",
-    "sec-websocket-accept",
-    "sec-websocket-extensions",
-    "sec-websocket-protocol",
+    "content-length",
+    "transfer-encoding",
     "upgrade"
   )
 
@@ -85,7 +84,8 @@ object WebSocket {
   private[play] def allowedHandshakeResponseHeaders(headers: Headers): Seq[(String, String)] = {
     headers.headers.filterNot {
       case (name, _) =>
-        ReservedHandshakeResponseHeaders(name.toLowerCase(java.util.Locale.ROOT))
+        val lowerName = name.toLowerCase(java.util.Locale.ROOT)
+        ReservedHandshakeResponseHeaders(lowerName) || lowerName.startsWith("sec-websocket-")
     }
   }
 
@@ -123,6 +123,7 @@ object WebSocket {
    *                       an exception from it fails the WebSocket stream
    * @param headers additional HTTP headers to send with the WebSocket upgrade response
    * @param newCookies additional cookies to send with the WebSocket upgrade response
+   * @param newSession a session to send with the WebSocket upgrade response
    */
   case class Accepted[In, Out](
       flow: Flow[In, Out, ?],
@@ -135,10 +136,12 @@ object WebSocket {
   ) {
 
     /**
-     * Adds headers to this WebSocket upgrade response.
+     * Adds or replaces headers in this WebSocket upgrade response.
+     *
+     * Connection and framing headers, and all `Sec-WebSocket-*` headers, are controlled by Play and will not be sent.
      */
     def withHeaders(headers: (String, String)*): Accepted[In, Out] = {
-      copy(headers = this.headers.add(headers*))
+      copy(headers = headers.foldLeft(this.headers) { case (current, header) => current.replace(header) })
     }
 
     /**
@@ -203,8 +206,9 @@ object WebSocket {
         sessionBaker: CookieBaker[Session] = new DefaultSessionCookieBaker()
     ): Accepted[In, Out] = {
       val allCookies = {
-        val setCookieCookies =
-          cookieHeaderEncoding.decodeSetCookieHeader(headers.get(HeaderNames.SET_COOKIE).getOrElse(""))
+        val setCookieCookies = headers
+          .getAll(HeaderNames.SET_COOKIE)
+          .flatMap(cookieHeaderEncoding.decodeSetCookieHeader)
         val session = newSession.map { data =>
           if (data.isEmpty) sessionBaker.discard.toCookie else sessionBaker.encodeAsCookie(data)
         }
@@ -214,7 +218,9 @@ object WebSocket {
       if (allCookies.isEmpty) {
         this
       } else {
-        withHeaders(HeaderNames.SET_COOKIE -> cookieHeaderEncoding.encodeSetCookieHeader(allCookies))
+        copy(headers =
+          headers.replace(HeaderNames.SET_COOKIE -> cookieHeaderEncoding.encodeSetCookieHeader(allCookies))
+        )
       }
     }
   }

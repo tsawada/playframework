@@ -234,16 +234,7 @@ private[play] class PlayRequestHandler(
                     .allowExtensions(true)
                     .maxFramePayloadLength(wsBufferLimit)
                     .build(),
-                  resultUtils(tryApp)
-                    .prepareWebSocketHandshakeHeaders(accepted)
-                    .flatMap {
-                      case (HeaderNames.SET_COOKIE, value) =>
-                        resultUtils(tryApp).splitSetCookieHeaderValue(value).map(HeaderNames.SET_COOKIE -> _)
-                      case (name, value) =>
-                        resultUtils(tryApp).validateHeaderNameChars(name)
-                        resultUtils(tryApp).validateHeaderValueChars(value)
-                        (name -> value) :: Nil
-                    }
+                  resultUtils(tryApp).prepareWebSocketHandshakeHeaders(accepted)
                 )
               channel.attr(PlayWebSocketCompression.Enabled).set(java.lang.Boolean.valueOf(accepted.compressionEnabled))
               Future.successful(
