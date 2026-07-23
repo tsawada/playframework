@@ -434,23 +434,34 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
       case (action: EssentialAction, _) =>
         runAction(tryApp, request, taggedRequestHeader, requestBodySource, action, errorHandler(tryApp), true)
       case (websocket: WebSocket, Some(upgrade)) =>
-        websocket.applyWithOptions(taggedRequestHeader).fast.flatMap {
-          case Left(result) =>
-            modelConversion(tryApp).convertResult(taggedRequestHeader, result, request.protocol, errorHandler(tryApp))
-          case Right(accepted) =>
-            Future.successful(
-              WebSocketHandler
-                .handleWebSocket(
-                  upgrade,
-                  accepted.flow,
-                  wsBufferLimit,
-                  accepted.subprotocol,
-                  accepted.compressionEnabled,
-                  wsKeepAliveMode,
-                  wsKeepAliveMaxIdle
-                )
-            )
-        }
+        Future(websocket.applyWithOptions(taggedRequestHeader))
+          .flatMap(identity)
+          .fast
+          .flatMap {
+            case Left(result) =>
+              modelConversion(tryApp).convertResult(taggedRequestHeader, result, request.protocol, errorHandler(tryApp))
+            case Right(accepted) =>
+              WebSocket.validateSubprotocol(taggedRequestHeader, accepted.subprotocol)
+              Future.successful(
+                WebSocketHandler
+                  .handleWebSocket(
+                    upgrade,
+                    accepted.flow,
+                    wsBufferLimit,
+                    accepted.subprotocol,
+                    accepted.compressionEnabled,
+                    wsKeepAliveMode,
+                    wsKeepAliveMaxIdle
+                  )
+              )
+          }
+          .recoverWith {
+            case NonFatal(error) =>
+              errorHandler(tryApp).onServerError(taggedRequestHeader, error).flatMap { result =>
+                modelConversion(tryApp)
+                  .convertResult(taggedRequestHeader, result, request.protocol, errorHandler(tryApp))
+              }
+          }
 
       case (websocket: WebSocket, None) =>
         // WebSocket handler for non WebSocket request

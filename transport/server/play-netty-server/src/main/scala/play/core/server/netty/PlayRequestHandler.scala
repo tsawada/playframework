@@ -213,6 +213,7 @@ private[play] class PlayRequestHandler(
               val action = EssentialAction(_ => Accumulator.done(result))
               handleAction(action, requestHeader, request, tryApp)
             case Right(accepted) =>
+              WebSocket.validateSubprotocol(requestHeader, accepted.subprotocol)
               import app.materializer
               val processor =
                 WebSocketHandler.messageFlowToFrameProcessor(

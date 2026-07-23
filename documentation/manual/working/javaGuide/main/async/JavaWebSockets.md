@@ -98,7 +98,7 @@ A client can offer one or more WebSocket subprotocols using the `Sec-WebSocket-P
 
 @[subprotocol](code/javaguide/async/JavaWebSockets.java)
 
-If no offered subprotocol is acceptable, use `acceptOrResultWithOptions` to reject the upgrade with a normal HTTP result. If a specific client or protocol requires the handshake to complete without a selected subprotocol, return `new WebSocket.Accepted<>(flow, Optional.empty())` and use a flow that closes the WebSocket.
+If no offered subprotocol is acceptable, use `acceptOrResultWithOptions` to reject the upgrade with a normal HTTP result. Selecting a subprotocol that the client did not offer is an application error. Play passes it to the configured `HttpErrorHandler` without completing the upgrade; the default response is HTTP 500. If a specific client or protocol requires the handshake to complete without a selected subprotocol, return `new WebSocket.Accepted<>(flow, Optional.empty())` and use a flow that closes the WebSocket.
 
 ## Accessing a WebSocket
 

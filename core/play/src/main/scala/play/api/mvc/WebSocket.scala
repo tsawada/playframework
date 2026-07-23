@@ -44,16 +44,32 @@ trait WebSocket extends Handler {
  * Helper utilities to generate WebSocket results.
  */
 object WebSocket {
+  private val SubprotocolHeader = "Sec-WebSocket-Protocol"
+
+  private def requestedSubprotocols(request: RequestHeader): Seq[String] = {
+    request.headers
+      .getAll(SubprotocolHeader)
+      .flatMap(_.split(",").iterator.map(_.trim).filter(_.nonEmpty))
+  }
+
   private def closeOnException(flow: Flow[Message, Message, ?]): Flow[Message, Message, ?] = {
     flow.recover { case WebSocketCloseException(close) => close }
   }
 
   private[play] def firstRequestedSubprotocol(request: RequestHeader): Option[String] = {
-    request.headers
-      .get("Sec-WebSocket-Protocol")
-      .toSeq
-      .flatMap(_.split(",").iterator.map(_.trim).filter(_.nonEmpty))
-      .headOption
+    requestedSubprotocols(request).headOption
+  }
+
+  // Validate in Play so invalid application selections fail consistently across server backends.
+  private[play] def validateSubprotocol(request: RequestHeader, selectedSubprotocol: Option[String]): Unit = {
+    selectedSubprotocol.foreach { selected =>
+      val requested = requestedSubprotocols(request)
+      if (!requested.contains(selected)) {
+        throw new IllegalArgumentException(
+          s"The application selected WebSocket subprotocol '$selected', but the client offered [${requested.mkString(", ")}]"
+        )
+      }
+    }
   }
 
   def apply(f: RequestHeader => Future[Either[Result, Flow[Message, Message, ?]]]): WebSocket = {
@@ -64,7 +80,9 @@ object WebSocket {
    * An accepted WebSocket, including the flow that handles WebSocket messages and optional handshake metadata.
    *
    * @param flow the flow that handles WebSocket messages
-   * @param subprotocol the WebSocket subprotocol selected by the application, if any
+   * @param subprotocol the WebSocket subprotocol selected by the application, if any; this must be one of the
+   *                    subprotocols offered by the client, otherwise Play passes the application error to the configured
+   *                    [[play.api.http.HttpErrorHandler]], which returns an HTTP 500 response by default
    * @param compressionEnabled whether this accepted WebSocket may negotiate compression when compression is enabled in
    *                           the server configuration; setting this to `true` does not enable compression globally
    */
