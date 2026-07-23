@@ -236,6 +236,82 @@ class NettyWebSocketSpec extends WebSocketSpec with NettyIntegrationSpecificatio
   override def expectedServerMaxWindowBits: Option[Int] = Some(12)
 
   "Plays WebSockets using netty backend with compression" should {
+    def failToStartWithInvalidCompressionSetting(path: String, value: Any) = {
+      withServer(
+        app => WebSocket.accept[String, String] { req => Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String]) },
+        Map(path -> value)
+      ) { (_, _) =>
+        ()
+      } must throwA[RuntimeException].like {
+        case exception =>
+          (exception.getCause must beAnInstanceOf[play.core.server.ServerStartException])
+            .and(exception.getMessage must contain(path))
+      }
+    }
+
+    "fail at startup when compressionLevel is below its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.websocket.compression.perMessageDeflate.compressionLevel",
+        -1
+      )
+    }
+
+    "fail at startup when compressionLevel is above its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.websocket.compression.perMessageDeflate.compressionLevel",
+        10
+      )
+    }
+
+    "fail at startup when preferredClientWindowSize is below its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.websocket.compression.perMessageDeflate.preferredClientWindowSize",
+        7
+      )
+    }
+
+    "fail at startup when preferredClientWindowSize is above its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.websocket.compression.perMessageDeflate.preferredClientWindowSize",
+        16
+      )
+    }
+
+    "fail at startup when serverWindowSize is below its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.netty.websocket.compression.perMessageDeflate.serverWindowSize",
+        7
+      )
+    }
+
+    "fail at startup when serverWindowSize is above its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.netty.websocket.compression.perMessageDeflate.serverWindowSize",
+        16
+      )
+    }
+
+    "fail at startup when memLevel is below its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.netty.websocket.compression.perMessageDeflate.memLevel",
+        0
+      )
+    }
+
+    "fail at startup when memLevel is above its valid range" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.netty.websocket.compression.perMessageDeflate.memLevel",
+        10
+      )
+    }
+
+    "fail at startup when allowServerWindowSize is invalid" in {
+      failToStartWithInvalidCompressionSetting(
+        "play.server.netty.websocket.compression.perMessageDeflate.allowServerWindowSize",
+        "invalid"
+      )
+    }
+
     "fail clearly when Netty websocket compression maxAllocation exceeds Netty's integer limit" in {
       withServer(
         app => WebSocket.accept[String, String] { req => Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String]) },
