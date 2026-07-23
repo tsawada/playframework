@@ -76,45 +76,86 @@ class NettyServer(
     extends Server {
   initializeChannelOptionsStaticMembers()
 
+  import NettyServer._
+
   private val serverConfig         = config.configuration.get[Configuration]("play.server")
   private val nettyConfig          = serverConfig.get[Configuration]("netty")
   private val serverHeader         = nettyConfig.get[Option[String]]("server-header").collect { case s if s.nonEmpty => s }
   private val maxInitialLineLength = nettyConfig.get[Int]("maxInitialLineLength")
   private val maxHeaderSize        =
     serverConfig.getDeprecated[ConfigMemorySize]("max-header-size", "netty.maxHeaderSize").toBytes.toInt
-  private val maxContentLength           = Server.getPossiblyInfiniteBytes(serverConfig.underlying, "max-content-length")
-  private val maxChunkSize               = nettyConfig.get[Int]("maxChunkSize")
-  private val threadCount                = nettyConfig.get[Int]("eventLoopThreads")
-  private val logWire                    = nettyConfig.get[Boolean]("log.wire")
-  private val bootstrapOption            = nettyConfig.get[Config]("option")
-  private val channelOption              = nettyConfig.get[Config]("option.child")
-  private val httpsWantClientAuth        = serverConfig.get[Boolean]("https.wantClientAuth")
-  private val httpsNeedClientAuth        = serverConfig.get[Boolean]("https.needClientAuth")
-  private val httpIdleTimeout            = serverConfig.get[Duration]("http.idleTimeout")
-  private val httpsIdleTimeout           = serverConfig.get[Duration]("https.idleTimeout")
-  private val shutdownQuietPeriod        = nettyConfig.get[FiniteDuration]("shutdownQuietPeriod")
-  private val terminationDelay           = serverConfig.get[FiniteDuration]("waitBeforeTermination")
-  private val terminationTimeout         = serverConfig.getOptional[FiniteDuration]("terminationTimeout")
-  private val wsBufferLimit              = serverConfig.get[ConfigMemorySize]("websocket.frame.maxLength").toBytes.toInt
-  private val wsKeepAliveMode            = serverConfig.get[String]("websocket.periodic-keep-alive-mode")
-  private val wsKeepAliveMaxIdle         = serverConfig.get[Duration]("websocket.periodic-keep-alive-max-idle")
-  private val wsCompression              = serverConfig.get[Boolean]("websocket.compression.enabled")
-  private val wsCompressionConfig        = serverConfig.get[Configuration]("websocket.compression")
-  private val nettyWsCompressionConfig   = nettyConfig.get[Configuration]("websocket.compression")
-  private val wsCompressionMaxAllocation =
-    if (wsCompression) {
+  private val maxContentLength         = Server.getPossiblyInfiniteBytes(serverConfig.underlying, "max-content-length")
+  private val maxChunkSize             = nettyConfig.get[Int]("maxChunkSize")
+  private val threadCount              = nettyConfig.get[Int]("eventLoopThreads")
+  private val logWire                  = nettyConfig.get[Boolean]("log.wire")
+  private val bootstrapOption          = nettyConfig.get[Config]("option")
+  private val channelOption            = nettyConfig.get[Config]("option.child")
+  private val httpsWantClientAuth      = serverConfig.get[Boolean]("https.wantClientAuth")
+  private val httpsNeedClientAuth      = serverConfig.get[Boolean]("https.needClientAuth")
+  private val httpIdleTimeout          = serverConfig.get[Duration]("http.idleTimeout")
+  private val httpsIdleTimeout         = serverConfig.get[Duration]("https.idleTimeout")
+  private val shutdownQuietPeriod      = nettyConfig.get[FiniteDuration]("shutdownQuietPeriod")
+  private val terminationDelay         = serverConfig.get[FiniteDuration]("waitBeforeTermination")
+  private val terminationTimeout       = serverConfig.getOptional[FiniteDuration]("terminationTimeout")
+  private val wsBufferLimit            = serverConfig.get[ConfigMemorySize]("websocket.frame.maxLength").toBytes.toInt
+  private val wsKeepAliveMode          = serverConfig.get[String]("websocket.periodic-keep-alive-mode")
+  private val wsKeepAliveMaxIdle       = serverConfig.get[Duration]("websocket.periodic-keep-alive-max-idle")
+  private val wsCompression            = serverConfig.get[Boolean]("websocket.compression.enabled")
+  private val wsCompressionConfig      = serverConfig.get[Configuration]("websocket.compression")
+  private val nettyWsCompressionConfig = nettyConfig.get[Configuration]("websocket.compression")
+  private val wsCompressionSettings    =
+    if (!wsCompression) {
+      None
+    } else {
+      val perMessageDeflateConfig      = wsCompressionConfig.get[Configuration]("perMessageDeflate")
+      val nettyPerMessageDeflateConfig = nettyWsCompressionConfig.get[Configuration]("perMessageDeflate")
+
       Some(
-        getMemorySizeAsInt(
-          wsCompressionConfig,
-          "maxAllocation",
-          "play.server.websocket.compression.maxAllocation"
+        WebSocketCompressionSettings(
+          compressionLevel = getIntInRange(
+            perMessageDeflateConfig,
+            "compressionLevel",
+            "play.server.websocket.compression.perMessageDeflate.compressionLevel",
+            0,
+            9
+          ),
+          allowServerWindowSize = getAutoBoolean(
+            nettyPerMessageDeflateConfig,
+            "allowServerWindowSize",
+            "play.server.netty.websocket.compression.perMessageDeflate.allowServerWindowSize",
+            ZlibCodecFactory.isSupportingWindowSizeAndMemLevel()
+          ),
+          preferredClientWindowSize = getIntInRange(
+            perMessageDeflateConfig,
+            "preferredClientWindowSize",
+            "play.server.websocket.compression.perMessageDeflate.preferredClientWindowSize",
+            PerMessageDeflateServerExtensionHandshaker.MIN_WINDOW_SIZE,
+            PerMessageDeflateServerExtensionHandshaker.MAX_WINDOW_SIZE
+          ),
+          allowServerNoContext = perMessageDeflateConfig.get[Boolean]("allowServerNoContext"),
+          preferredClientNoContext = perMessageDeflateConfig.get[Boolean]("preferredClientNoContext"),
+          serverWindowSize = getIntInRange(
+            nettyPerMessageDeflateConfig,
+            "serverWindowSize",
+            "play.server.netty.websocket.compression.perMessageDeflate.serverWindowSize",
+            PerMessageDeflateServerExtensionHandshaker.MIN_WINDOW_SIZE,
+            PerMessageDeflateServerExtensionHandshaker.MAX_WINDOW_SIZE
+          ),
+          memLevel = getIntInRange(
+            nettyPerMessageDeflateConfig,
+            "memLevel",
+            "play.server.netty.websocket.compression.perMessageDeflate.memLevel",
+            PerMessageDeflateServerExtensionHandshaker.MIN_MEM_LEVEL,
+            PerMessageDeflateServerExtensionHandshaker.MAX_MEM_LEVEL
+          ),
+          maxAllocation = getMemorySizeAsInt(
+            wsCompressionConfig,
+            "maxAllocation",
+            "play.server.websocket.compression.maxAllocation"
+          )
         )
       )
-    } else {
-      None
     }
-  private val wsCompressionPerMessageDeflateConfig =
-    if (wsCompression) Some(wsCompressionConfig.get[Configuration]("perMessageDeflate")) else None
   private val deferBodyParsing = serverConfig.underlying.getBoolean("deferBodyParsing")
 
   private lazy val osName                   = sys.props("os.name").toLowerCase(Locale.ENGLISH)
@@ -122,8 +163,6 @@ class NettyServer(
   private lazy val isMac: Boolean           = osName.contains("mac")
   private lazy val isBSDDerivative: Boolean = // NetBSD currently not supported by Netty: netty/netty#10809
     isMac || osName.contains("freebsd") || osName.contains("openbsd");
-
-  import NettyServer._
 
   private lazy val transport = nettyConfig.get[String]("transport").toLowerCase(Locale.ENGLISH) match {
     case "native" | "io_uring" if isWindows =>
@@ -265,7 +304,7 @@ class NettyServer(
       deferBodyParsing
     )
 
-  private def getAutoBoolean(config: Configuration, path: String, auto: => Boolean): Boolean = {
+  private def getAutoBoolean(config: Configuration, path: String, displayPath: String, auto: => Boolean): Boolean = {
     config.underlying.getValue(path).unwrapped() match {
       case value: java.lang.Boolean                         => value.booleanValue()
       case value: String if value.equalsIgnoreCase("auto")  => auto
@@ -273,9 +312,25 @@ class NettyServer(
       case value: String if value.equalsIgnoreCase("false") => false
       case value                                            =>
         throw ServerStartException(
-          s"Netty WebSocket compression configuration value $path should be true, false or auto, but was $value"
+          s"Netty WebSocket compression configuration value $displayPath should be true, false or auto, but was $value"
         )
     }
+  }
+
+  private def getIntInRange(
+      config: Configuration,
+      path: String,
+      displayPath: String,
+      minimum: Int,
+      maximum: Int
+  ): Int = {
+    val value = config.get[Int](path)
+    if (value < minimum || value > maximum) {
+      throw ServerStartException(
+        s"Netty WebSocket compression configuration value $displayPath must be between $minimum and $maximum, but was $value"
+      )
+    }
+    value
   }
 
   private def getMemorySizeAsInt(config: Configuration, path: String, displayPath: String): Int = {
@@ -289,37 +344,25 @@ class NettyServer(
   }
 
   private def newWebSocketCompressionHandler(): Option[ChannelHandler] = {
-    if (!wsCompression) {
-      None
-    } else {
-      val maxAllocation                = wsCompressionMaxAllocation.get
-      val perMessageDeflateConfig      = wsCompressionPerMessageDeflateConfig.get
-      val nettyPerMessageDeflateConfig = nettyWsCompressionConfig.get[Configuration]("perMessageDeflate")
-
-      Some(
-        new WebSocketServerExtensionHandler(
-          new PerMessageDeflateServerExtensionHandshaker(
-            perMessageDeflateConfig.get[Int]("compressionLevel"),
-            getAutoBoolean(
-              nettyPerMessageDeflateConfig,
-              "allowServerWindowSize",
-              ZlibCodecFactory.isSupportingWindowSizeAndMemLevel()
-            ),
-            perMessageDeflateConfig.get[Int]("preferredClientWindowSize"),
-            perMessageDeflateConfig.get[Boolean]("allowServerNoContext"),
-            perMessageDeflateConfig.get[Boolean]("preferredClientNoContext"),
-            nettyPerMessageDeflateConfig.get[Int]("serverWindowSize"),
-            nettyPerMessageDeflateConfig.get[Int]("memLevel"),
-            maxAllocation
-          )
-        ) {
-          protected override def isExtensionNegotiationEnabled(
-              ctx: ChannelHandlerContext,
-              response: HttpResponse
-          ): Boolean =
-            Option(ctx.channel().attr(PlayWebSocketCompression.Enabled).get()).forall(_.booleanValue())
-        }
-      )
+    wsCompressionSettings.map { settings =>
+      new WebSocketServerExtensionHandler(
+        new PerMessageDeflateServerExtensionHandshaker(
+          settings.compressionLevel,
+          settings.allowServerWindowSize,
+          settings.preferredClientWindowSize,
+          settings.allowServerNoContext,
+          settings.preferredClientNoContext,
+          settings.serverWindowSize,
+          settings.memLevel,
+          settings.maxAllocation
+        )
+      ) {
+        protected override def isExtensionNegotiationEnabled(
+            ctx: ChannelHandlerContext,
+            response: HttpResponse
+        ): Boolean =
+          Option(ctx.channel().attr(PlayWebSocketCompression.Enabled).get()).forall(_.booleanValue())
+      }
     }
   }
 
@@ -575,6 +618,17 @@ class NettyServerProvider extends ServerProvider {
  */
 object NettyServer extends ServerFromRouter {
   private val logger = Logger(this.getClass)
+
+  private case class WebSocketCompressionSettings(
+      compressionLevel: Int,
+      allowServerWindowSize: Boolean,
+      preferredClientWindowSize: Int,
+      allowServerNoContext: Boolean,
+      preferredClientNoContext: Boolean,
+      serverWindowSize: Int,
+      memLevel: Int,
+      maxAllocation: Int
+  )
 
   implicit val provider: NettyServerProvider = new NettyServerProvider
 
