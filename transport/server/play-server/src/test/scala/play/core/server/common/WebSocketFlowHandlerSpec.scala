@@ -19,6 +19,9 @@ import org.specs2.mutable.Specification
 import play.api.http.websocket.CloseCodes
 import play.api.http.websocket.CloseMessage
 import play.api.http.websocket.Message
+import play.api.http.websocket.PingMessage
+import play.api.http.websocket.PongMessage
+import play.api.http.websocket.TextMessage
 
 class WebSocketFlowHandlerSpec extends Specification {
   "WebSocketFlowHandler" should {
@@ -33,6 +36,16 @@ class WebSocketFlowHandlerSpec extends Specification {
       val messages = runFailedRemoteInput(new RuntimeException("Invalid close frame getStatus code: 1006"))
 
       messages must contain(exactly(closeMessage(CloseCodes.ConnectionAbort)))
+    }
+
+    "not send 1006 for a protocol violation already handled by the backend" in withActorSystem {
+      implicit materializer =>
+        val messages =
+          runFailedRemoteInput(
+            new WebSocketFlowHandler.BackendHandledProtocolViolation(new RuntimeException("protocol violation"))
+          )
+
+        messages must beEmpty
     }
 
     "not send 1006 when the application initiated close and remote input then fails" in withActorSystem {
@@ -99,6 +112,57 @@ class WebSocketFlowHandlerSpec extends Specification {
       val (_, remoteMessages) = runRemoteInputAndCollectAppAndRemoteMessages(rawClose(None))
 
       remoteMessages must contain(exactly(beEqualTo(CloseMessage(None))))
+    }
+
+    Seq(
+      WebSocketFlowHandler.MessageType.Ping,
+      WebSocketFlowHandler.MessageType.Pong,
+      WebSocketFlowHandler.MessageType.Close
+    ).foreach { messageType =>
+      s"reject a fragmented $messageType control frame" in withActorSystem { implicit materializer =>
+        val (appMessages, remoteMessages) = runRemoteInputAndCollectAppAndRemoteMessages(
+          rawMessage(messageType, ByteString("control"), isFinal = false),
+          rawClose(CloseCodes.ProtocolError)
+        )
+
+        appMessages must beEmpty
+        remoteMessages must contain(exactly(closeMessage(CloseCodes.ProtocolError)))
+      }
+
+      s"reject an oversized $messageType control frame" in withActorSystem { implicit materializer =>
+        val (appMessages, remoteMessages) = runRemoteInputAndCollectAppAndRemoteMessages(
+          rawMessage(messageType, ByteString(Array.fill[Byte](126)('a'.toByte)), isFinal = true),
+          rawClose(CloseCodes.ProtocolError)
+        )
+
+        appMessages must beEmpty
+        remoteMessages must contain(exactly(closeMessage(CloseCodes.ProtocolError)))
+      }
+    }
+
+    "preserve fragmented data state while processing control frames" in withActorSystem { implicit materializer =>
+      val (appMessages, remoteMessages) = runRemoteInputAndCollectAppAndRemoteMessages(
+        rawMessage(WebSocketFlowHandler.MessageType.Text, ByteString("hel"), isFinal = false),
+        rawMessage(WebSocketFlowHandler.MessageType.Ping, ByteString("ping"), isFinal = true),
+        rawMessage(WebSocketFlowHandler.MessageType.Pong, ByteString("pong"), isFinal = true),
+        rawMessage(WebSocketFlowHandler.MessageType.Continuation, ByteString("lo"), isFinal = true),
+        rawClose(CloseCodes.Regular)
+      )
+
+      appMessages must beEqualTo(
+        Seq(
+          PingMessage(ByteString("ping")),
+          PongMessage(ByteString("pong")),
+          TextMessage("hello"),
+          CloseMessage(CloseCodes.Regular)
+        )
+      )
+      remoteMessages must beEqualTo(
+        Seq(
+          PongMessage(ByteString("ping")),
+          CloseMessage(CloseCodes.Regular)
+        )
+      )
     }
   }
 
@@ -215,11 +279,15 @@ class WebSocketFlowHandlerSpec extends Specification {
   }
 
   private def rawClose(statusCode: Option[Int]): WebSocketFlowHandler.RawMessage = {
-    WebSocketFlowHandler.RawMessage(
-      WebSocketFlowHandler.MessageType.Close,
-      statusCode.fold(ByteString.empty)(rawCloseData),
-      isFinal = true
-    )
+    rawMessage(WebSocketFlowHandler.MessageType.Close, statusCode.fold(ByteString.empty)(rawCloseData), isFinal = true)
+  }
+
+  private def rawMessage(
+      messageType: WebSocketFlowHandler.MessageType.Type,
+      data: ByteString,
+      isFinal: Boolean
+  ): WebSocketFlowHandler.RawMessage = {
+    WebSocketFlowHandler.RawMessage(messageType, data, isFinal)
   }
 
   private def rawCloseData(statusCode: Int): ByteString = {

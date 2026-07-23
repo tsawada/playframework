@@ -78,6 +78,7 @@ object WebSocketClient {
       SimpleMessage(message, finalFragment = true)
   }
   case class SimpleMessage(message: Message, finalFragment: Boolean)       extends ExtendedMessage
+  case class RawTextMessage(data: ByteString, finalFragment: Boolean)      extends ExtendedMessage
   case class ContinuationMessage(data: ByteString, finalFragment: Boolean) extends ExtendedMessage
   case class RawWebSocketFrame(frameType: String, data: ByteString, rsv: Int, finalFragment: Boolean)
       extends ExtendedMessage
@@ -227,7 +228,7 @@ object WebSocketClient {
           new GraphStageLogic(shape) with InHandler with OutHandler {
             def onPush(): Unit = {
               grab(in) match {
-                case close: CloseWebSocketFrame =>
+                case close: CloseWebSocketFrame if close.isFinalFragment && close.content().readableBytes() <= 125 =>
                   clientInitiatedClose.set(true)
                   push(out, close)
                 case other => push(out, other)
@@ -246,7 +247,9 @@ object WebSocketClient {
       })
 
       val messagesToFrames = Flow[ExtendedMessage].map {
-        case SimpleMessage(TextMessage(data), finalFragment)   => new TextWebSocketFrame(finalFragment, 0, data)
+        case SimpleMessage(TextMessage(data), finalFragment) => new TextWebSocketFrame(finalFragment, 0, data)
+        case RawTextMessage(data, finalFragment)             =>
+          new TextWebSocketFrame(finalFragment, 0, Unpooled.wrappedBuffer(data.asByteBuffer))
         case SimpleMessage(BinaryMessage(data), finalFragment) =>
           new BinaryWebSocketFrame(finalFragment, 0, Unpooled.wrappedBuffer(data.asByteBuffer))
         case SimpleMessage(PingMessage(data), finalFragment) =>

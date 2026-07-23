@@ -49,6 +49,7 @@ import play.it._
 import play.it.http.websocket.WebSocketClient.CompressionMode
 import play.it.http.websocket.WebSocketClient.ContinuationMessage
 import play.it.http.websocket.WebSocketClient.ExtendedMessage
+import play.it.http.websocket.WebSocketClient.RawTextMessage
 import play.it.http.websocket.WebSocketClient.RawWebSocketFrame
 import play.it.http.websocket.WebSocketClient.SimpleMessage
 
@@ -566,6 +567,85 @@ trait WebSocketSpec
           )
           result.map(b => b.utf8String) must_== Seq("first", "second", "third")
         }
+      }
+
+      "reject invalid UTF-8 in a text message" in {
+        val (frames, messages) = sendProtocolFrames(RawTextMessage(ByteString(0xc3.toByte, 0x28), true))
+
+        frames must contain(exactly(closeFrame(CloseCodes.InconsistentData)))
+        messages must beEmpty
+      }
+
+      "reject invalid UTF-8 split across text message fragments" in {
+        val (frames, messages) = sendProtocolFrames(
+          RawTextMessage(ByteString(0xe2.toByte), false),
+          ContinuationMessage(ByteString(0x28), true)
+        )
+
+        frames must contain(exactly(closeFrame(CloseCodes.InconsistentData)))
+        messages must beEmpty
+      }
+
+      "accept valid UTF-8 split across text message fragments" in {
+        val (_, messages) = sendProtocolFrames(
+          RawTextMessage(ByteString(0xe2.toByte, 0x82.toByte), false),
+          ContinuationMessage(ByteString(0xac.toByte), true),
+          CloseMessage(CloseCodes.Regular)
+        )
+
+        messages must_== List(TextMessage("\u20ac"), CloseMessage(CloseCodes.Regular))
+      }
+
+      "allow control frames between data message fragments" in {
+        val (frames, messages) = sendProtocolFrames(
+          SimpleMessage(TextMessage("hel"), false),
+          PingMessage(ByteString("ping")),
+          PongMessage(ByteString("pong")),
+          ContinuationMessage(ByteString("lo"), true),
+          CloseMessage(CloseCodes.Regular)
+        )
+
+        frames must contain(exactly(pongFrame(be_==("ping")), closeFrame()).inOrder)
+        messages must_== List(
+          PingMessage(ByteString("ping")),
+          PongMessage(ByteString("pong")),
+          TextMessage("hello"),
+          CloseMessage(CloseCodes.Regular)
+        )
+      }
+
+      Seq(
+        "Ping"  -> SimpleMessage(PingMessage(ByteString("control")), false),
+        "Pong"  -> SimpleMessage(PongMessage(ByteString("control")), false),
+        "Close" -> SimpleMessage(CloseMessage(CloseCodes.Regular), false)
+      ).foreach {
+        case (name, frame) =>
+          s"reject a fragmented $name control frame" in {
+            val (frames, messages) = sendProtocolFrames(
+              frame,
+              ContinuationMessage(ByteString("continuation"), true),
+              CloseMessage(CloseCodes.Regular)
+            )
+
+            frames must contain(exactly(closeFrame(CloseCodes.ProtocolError)))
+            messages must beEmpty
+          }
+      }
+
+      "reject an oversized Pong control frame" in {
+        val (frames, messages) =
+          sendProtocolFrames(PongMessage(ByteString(Array.fill[Byte](126)('a'.toByte))))
+
+        frames must contain(exactly(closeFrame(CloseCodes.ProtocolError)))
+        messages must beEmpty
+      }
+
+      "reject an oversized Close control frame" in {
+        val (frames, messages) =
+          sendProtocolFrames(CloseMessage(CloseCodes.Regular, "a" * 124))
+
+        frames must contain(exactly(closeFrame(CloseCodes.ProtocolError)))
+        messages must beEmpty
       }
 
       "close the websocket when the buffer limit is exceeded" in {
@@ -1158,6 +1238,23 @@ trait WebSocketSpecMethods extends PlaySpecification with WsTestClient with Serv
   // frame is sent, but WebSockets require that the client waits for the server to echo the close back, and
   // let the server close.
   def sendFrames(frames: ExtendedMessage*) = Source(frames.toList).concat(Source.maybe)
+
+  def sendProtocolFrames(frames: ExtendedMessage*): (List[ExtendedMessage], List[Message]) = {
+    val consumed = Promise[List[Message]]()
+    withServer(app =>
+      WebSocket.accept[Message, Message] { req =>
+        Flow.fromSinkAndSource(onFramesConsumed[Message](consumed.success(_)), Source.maybe[Message])
+      }
+    ) { (app, port) =>
+      import app.materializer
+      runWebSocket(
+        port,
+        { flow =>
+          sendFrames(frames*).via(flow).runWith(consumeFrames).zip(consumed.future)
+        }
+      )
+    }
+  }
 
   /*
    * Shared tests

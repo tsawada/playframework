@@ -89,6 +89,11 @@ object WebSocketFlowHandler {
 
         var currentPartialMessage: RawMessage = null
 
+        val textDecoder = StandardCharsets.UTF_8
+          .newDecoder()
+          .onMalformedInput(CodingErrorAction.REPORT)
+          .onUnmappableCharacter(CodingErrorAction.REPORT)
+
         // For the remoteIn, we always and only pull when the appOut is available, the only exception being when appOut
         // is already closed and we're expecting a close ack from the client. This means whenever remoteIn pushes, we
         // always know we can push directly to appOut.  It does mean however that we will never respond to close or
@@ -134,7 +139,16 @@ object WebSocketFlowHandler {
 
         def toMessage(messageType: MessageType.Type, data: ByteString): Message = {
           messageType match {
-            case MessageType.Text   => TextMessage(data.utf8String)
+            case MessageType.Text =>
+              try {
+                TextMessage(textDecoder.reset().decode(data.asByteBuffer).toString)
+              } catch {
+                case _: CharacterCodingException =>
+                  serverInitiatedClose(
+                    CloseMessage(CloseCodes.InconsistentData, "Text message contained invalid UTF-8")
+                  )
+                  null
+              }
             case MessageType.Binary => BinaryMessage(data)
             case MessageType.Ping   => PingMessage(data)
             case MessageType.Pong   => PongMessage(data)
@@ -142,10 +156,24 @@ object WebSocketFlowHandler {
           }
         }
 
+        def isControlMessage(messageType: MessageType.Type): Boolean = {
+          messageType == MessageType.Ping ||
+          messageType == MessageType.Pong ||
+          messageType == MessageType.Close
+        }
+
         def consumeMessage(): Message = {
           val read = grab(remoteIn)
 
           read.messageType match {
+            case messageType if isControlMessage(messageType) && !read.isFinal =>
+              serverInitiatedClose(CloseMessage(CloseCodes.ProtocolError, "Control frames must not be fragmented"))
+              null
+            case messageType if isControlMessage(messageType) && read.data.size > 125 =>
+              serverInitiatedClose(
+                CloseMessage(CloseCodes.ProtocolError, "Control frame payload must not exceed 125 bytes")
+              )
+              null
             case MessageType.Ping if read.directAnswer =>
               // Ping the client (Part of idle handling)
               if (isAvailable(remoteOut)) {
@@ -166,6 +194,8 @@ object WebSocketFlowHandler {
                 pongToSend = PongMessage(ByteString.empty)
               }
               null
+            case MessageType.Ping | MessageType.Pong | MessageType.Close =>
+              toMessage(read.messageType, read.data)
             case MessageType.Continuation if currentPartialMessage == null =>
               serverInitiatedClose(CloseMessage(CloseCodes.ProtocolError, "Unexpected continuation frame"))
               null
@@ -243,24 +273,29 @@ object WebSocketFlowHandler {
             }
 
             override def onUpstreamFailure(ex: Throwable): Unit = {
-              // This happens e.g. when using the Netty backend and a client sends an invalid close status code
-              // that is not defined in https://tools.ietf.org/html/rfc6455#section-7.4
-              val closeFromFailure = if (state == Open) {
-                val statusCode = """(\d+)""".r
-                ex.getMessage match {
-                  case s"Invalid close frame getStatus code: ${statusCode(code)}" => // Parse Netty error message
-                    Some(CloseMessage(code.toInt))
-                  case _ => // Don't log the whole exception to not overwhelm the logs in case failures occur often
-                    logger.warn(s"WebSocket communication problem: ${ex.getMessage}")
+              ex match {
+                case _: BackendHandledProtocolViolation =>
+                  completeStage()
+                case _ =>
+                  // This happens e.g. when using the Netty backend and a client sends an invalid close status code
+                  // that is not defined in https://tools.ietf.org/html/rfc6455#section-7.4
+                  val closeFromFailure = if (state == Open) {
+                    val statusCode = """(\d+)""".r
+                    ex.getMessage match {
+                      case s"Invalid close frame getStatus code: ${statusCode(code)}" => // Parse Netty error message
+                        Some(CloseMessage(code.toInt))
+                      case _ => // Don't log the whole exception to not overwhelm the logs in case failures occur often
+                        logger.warn(s"WebSocket communication problem: ${ex.getMessage}")
+                        None
+                    }
+                  } else {
+                    logger.debug("WebSocket communication problem after the WebSocket was closed", ex)
                     None
-                }
-              } else {
-                logger.debug("WebSocket communication problem after the WebSocket was closed", ex)
-                None
-              }
-              closeFromFailure match {
-                case Some(close) => completeAfterForwardingCloseToApp(close)
-                case None        => completeRemoteInputAbnormally()
+                  }
+                  closeFromFailure match {
+                    case Some(close) => completeAfterForwardingCloseToApp(close)
+                    case None        => completeRemoteInputAbnormally()
+                  }
               }
             }
 
@@ -446,6 +481,8 @@ object WebSocketFlowHandler {
     type Type = Value
     val Ping, Pong, Text, Binary, Continuation, Close = Value
   }
+
+  private[server] final class BackendHandledProtocolViolation(cause: Throwable) extends RuntimeException(cause)
 
   def parseCloseMessage(data: ByteString): CloseMessage = {
     def invalid(reason: String) =
