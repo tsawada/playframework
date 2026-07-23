@@ -97,6 +97,18 @@ Java
 
 Handlers using typed APIs such as `WebSocket.accept[String, String]` still do not receive close control frames as typed messages. Use a raw `Message` flow if your application needs to inspect WebSocket close status codes directly.
 
+### Malformed WebSocket frames are rejected more strictly
+
+Play now validates incoming WebSocket text and control frames consistently across the Netty and Pekko HTTP server backends.
+
+Previously, malformed UTF-8 in a text message could be decoded with replacement characters and delivered to the application. Play now rejects the message, sends Close status `1007` to the remote peer, and does not deliver the malformed message. Valid UTF-8 remains supported when a multi-byte character is split across WebSocket fragments. This follows [RFC 6455 section 8.1](https://datatracker.ietf.org/doc/html/rfc6455#section-8.1).
+
+Play also rejects fragmented Ping, Pong, and Close control frames, and control frames with payloads larger than 125 bytes, by sending Close status `1002`. Valid control frames can still be interleaved between fragments of a data message, as required by [RFC 6455 section 5.4](https://datatracker.ietf.org/doc/html/rfc6455#section-5.4) and [section 5.5](https://datatracker.ietf.org/doc/html/rfc6455#section-5.5).
+
+When Netty detects and closes one of these protocol violations before it reaches Play's common WebSocket handler, Play now completes the application stream without also reporting a synthetic `1006` close message. Status `1006` remains the application-visible result for abnormal transport loss where no protocol error was already handled.
+
+Applications that previously expected replacement characters or a synthetic `1006` for malformed frames should update their handling. Clients that send valid RFC 6455 frames are unaffected.
+
 ### WebSocket close messages from typed transformers and application failures are more consistent
 
 Play now preserves more application-level WebSocket close reasons as WebSocket Close frames instead of turning them into generic stream termination.

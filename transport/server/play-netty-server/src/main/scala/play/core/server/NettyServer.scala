@@ -349,8 +349,10 @@ class NettyServer(
       }
 
       // Netty HTTP decoders/encoders/etc
-      pipeline.addLast("decoder", new HttpRequestDecoder(maxInitialLineLength, maxHeaderSize, maxChunkSize))
       pipeline.addLast("encoder", new PlayHttpResponseEncoder())
+      // The WebSocket handshaker installs its frame encoder before this HTTP encoder. Keeping the HTTP encoder before
+      // the decoder ensures decoder-generated protocol-error Close frames pass through the WebSocket encoder.
+      pipeline.addLast("decoder", new HttpRequestDecoder(maxInitialLineLength, maxHeaderSize, maxChunkSize))
       pipeline.addLast("decompressor", new HttpContentDecompressor())
       newWebSocketCompressionHandler().foreach(pipeline.addLast("ws-compressor", _))
       if (logWire) {

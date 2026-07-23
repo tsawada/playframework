@@ -38,7 +38,7 @@ private[server] object WebSocketHandler {
   ): Processor[WebSocketFrame, WebSocketFrame] = {
     // The reason we use a processor is that we *must* release the buffers synchronously, since Pekko streams drops
     // messages, which will mean we can't release the ByteBufs in the messages.
-    SynchronousMappedStreams.transform(
+    val processor = SynchronousMappedStreams.transform(
       WebSocketFlowHandler
         .webSocketProtocol(bufferLimit, wsKeepAliveMode, wsKeepAliveMaxIdle)
         .join(flow)
@@ -47,6 +47,23 @@ private[server] object WebSocketHandler {
       frameToMessage,
       messageToFrame
     )
+
+    new Processor[WebSocketFrame, WebSocketFrame] {
+      override def onSubscribe(subscription: org.reactivestreams.Subscription): Unit =
+        processor.onSubscribe(subscription)
+      override def onNext(frame: WebSocketFrame): Unit                                              = processor.onNext(frame)
+      override def onComplete(): Unit                                                               = processor.onComplete()
+      override def onError(error: Throwable): Unit                                                  = processor.onError(normalizeProtocolViolation(error))
+      override def subscribe(subscriber: org.reactivestreams.Subscriber[? >: WebSocketFrame]): Unit =
+        processor.subscribe(subscriber)
+    }
+  }
+
+  private def normalizeProtocolViolation(error: Throwable): Throwable = error match {
+    case corrupted: CorruptedWebSocketFrameException
+        if Option(corrupted.getMessage).forall(message => !message.startsWith("Invalid close frame getStatus code:")) =>
+      new WebSocketFlowHandler.BackendHandledProtocolViolation(corrupted)
+    case other => other
   }
 
   /**
