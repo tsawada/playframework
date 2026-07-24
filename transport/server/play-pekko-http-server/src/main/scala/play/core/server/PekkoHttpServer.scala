@@ -443,23 +443,25 @@ class PekkoHttpServer(context: PekkoHttpServer.Context) extends Server {
               modelConversion(tryApp).convertResult(taggedRequestHeader, result, request.protocol, errorHandler(tryApp))
             case Right(accepted) =>
               WebSocket.validateSubprotocol(taggedRequestHeader, accepted.subprotocol)
-              Future.successful(
-                WebSocketHandler
-                  .handleWebSocket(
-                    upgrade,
-                    accepted.flow,
-                    wsBufferLimit,
-                    accepted.subprotocol,
-                    accepted.compressionEnabled,
-                    wsCompressionThreshold,
-                    (message, payloadLength, isAboveCompressionThreshold) =>
-                      accepted.shouldCompress(
-                        new WebSocket.CompressionContext(message(), payloadLength, isAboveCompressionThreshold)
-                      ),
-                    wsKeepAliveMode,
-                    wsKeepAliveMaxIdle
-                  )
-              )
+              val handshakeHeaders = resultUtils(tryApp)
+                .prepareWebSocketHandshakeHeaders(accepted)
+                .map { case (name, value) => headers.RawHeader(name, value) }
+              val response = WebSocketHandler
+                .handleWebSocket(
+                  upgrade,
+                  accepted.flow,
+                  wsBufferLimit,
+                  accepted.subprotocol,
+                  accepted.compressionEnabled,
+                  wsCompressionThreshold,
+                  (message, payloadLength, isAboveCompressionThreshold) =>
+                    accepted.shouldCompress(
+                      new WebSocket.CompressionContext(message(), payloadLength, isAboveCompressionThreshold)
+                    ),
+                  wsKeepAliveMode,
+                  wsKeepAliveMaxIdle
+                )
+              Future.successful(response.withHeaders(response.headers ++ handshakeHeaders))
           }
           .recoverWith {
             case NonFatal(error) =>

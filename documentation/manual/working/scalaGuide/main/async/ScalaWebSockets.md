@@ -102,6 +102,16 @@ A client can offer one or more WebSocket subprotocols using the `Sec-WebSocket-P
 
 If no offered subprotocol is acceptable, use `acceptOrResultWithOptions` to reject the upgrade with a normal HTTP result. Selecting a subprotocol that the client did not offer is an application error. Play passes it to the configured `HttpErrorHandler` without completing the upgrade; the default response is HTTP 500. If a specific client or protocol requires the handshake to complete without a selected subprotocol, return `WebSocket.Accepted(flow, None)` and use a flow that closes the WebSocket.
 
+## Setting WebSocket handshake response options
+
+`acceptWithOptions` and `acceptOrResultWithOptions` also let applications add headers, cookies, and session data to the successful `101 Switching Protocols` response:
+
+@[handshake-options](code/ScalaWebSockets.scala)
+
+These headers, cookies, and session updates are sent only with the opening WebSocket handshake response. Connection and framing headers, and all `Sec-WebSocket-*` headers, are controlled by Play.
+
+Browser WebSocket APIs do not expose handshake response headers to JavaScript. Cookies can still be processed by the browser; other custom headers are mainly useful to non-browser clients and intermediaries.
+
 ## Accessing a WebSocket
 
 To send data or access a websocket you need to add a route for your websocket in your routes file. For Example

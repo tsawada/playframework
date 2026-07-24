@@ -36,10 +36,14 @@ import play.api.libs.json.Json
 import play.api.libs.json.Reads
 import play.api.libs.streams.ActorFlow
 import play.api.libs.ws.WSClient
+import play.api.mvc.Cookie
+import play.api.mvc.CookieHeaderEncoding
+import play.api.mvc.DiscardingCookie
 import play.api.mvc.Handler
 import play.api.mvc.RequestHeader
 import play.api.mvc.Result
 import play.api.mvc.Results
+import play.api.mvc.SessionCookieBaker
 import play.api.mvc.WebSocket
 import play.api.routing.HandlerDef
 import play.api.test._
@@ -1064,6 +1068,147 @@ trait WebSocketSpec
         }
       }
 
+      "preserve all accepted options when adding handshake headers, cookies, and session data" in {
+        withServer(
+          app =>
+            WebSocket.acceptWithOptions[String, String] { req =>
+              val flow: Flow[String, String, ?] =
+                Flow.fromSinkAndSource(Sink.ignore, Source.single("plain server message"))
+              WebSocket
+                .Accepted(flow, Some("graphql-transport-ws"), compressionEnabled = false)
+                .withHeaders(
+                  "X-WebSocket-Trace" -> "discarded",
+                  "x-websocket-trace" -> "scala-trace",
+                  "X-Remove"          -> "remove",
+                  "Set-Cookie"        -> "scala-raw-cookie=raw-value; Path=/"
+                )
+                .discardingHeader("x-remove")
+                .withCookies(Cookie("scala-ws-cookie", "cookie-value", httpOnly = true))
+                .discardingCookies(
+                  DiscardingCookie(
+                    "scala-expired",
+                    secure = true,
+                    sameSite = Some(Cookie.SameSite.Lax),
+                    partitioned = true
+                  )
+                )
+                .withSession("websocket" -> "connected")
+            },
+          Map("play.http.session.cookieName" -> "SCALA_SESSION")
+        ) { (app, port) =>
+          import app.materializer
+          val (frames, responseHeaderSeq) = runWebSocket(
+            port,
+            { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+            Some("graphql-ws, graphql-transport-ws"),
+            c => c,
+            CompressionMode.RequestOnly()
+          )
+          val responseHeaders = responseHeaderSeq.map { case (key, value) => (key.toLowerCase, value) }
+
+          responseHeaders.collect { case ("sec-websocket-protocol", value) => value } must contain(
+            exactly("graphql-transport-ws")
+          )
+          responseHeaders.collect { case ("sec-websocket-extensions", value) => value } must beEmpty
+          responseHeaders must contain("x-websocket-trace" -> "scala-trace")
+          responseHeaders.collect { case ("x-websocket-trace", value) => value } must contain(
+            exactly("scala-trace")
+          )
+          responseHeaders.collect { case ("x-remove", value) => value } must beEmpty
+          frames.collectFirst {
+            case SimpleMessage(TextMessage(data), true) => data
+          } must beSome("plain server message")
+
+          val cookieHeaderEncoding = app.injector.instanceOf[CookieHeaderEncoding]
+          val responseCookies      = responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .flatMap(cookieHeaderEncoding.decodeSetCookieHeader)
+          responseCookies.count(_.name == "scala-raw-cookie") must_== 1
+          responseCookies.find(_.name == "scala-raw-cookie").map(_.value) must beSome("raw-value")
+          responseCookies.find(_.name == "scala-ws-cookie").map(_.value) must beSome("cookie-value")
+          responseCookies.find(_.name == "scala-expired") must beSome[Cookie].like {
+            case cookie =>
+              (cookie.maxAge must beSome(Cookie.DiscardedMaxAge))
+                .and(cookie.secure must beTrue)
+                .and(cookie.sameSite must_== Some(Cookie.SameSite.Lax))
+                .and(cookie.partitioned must beTrue)
+          }
+
+          val sessionBaker = app.injector.instanceOf[SessionCookieBaker]
+          sessionBaker.COOKIE_NAME must_== "SCALA_SESSION"
+          sessionBaker.decodeFromCookie(responseCookies.find(_.name == sessionBaker.COOKIE_NAME)).data must_== Map(
+            "websocket" -> "connected"
+          )
+        }
+      }
+
+      "ignore application supplied WebSocket protocol-owned handshake headers" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            val flow: Flow[String, String, ?] = Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String])
+            WebSocket
+              .Accepted(flow)
+              .withHeaders(
+                "Connection"               -> "close",
+                "Content-Length"           -> "42",
+                "Transfer-Encoding"        -> "chunked",
+                "Upgrade"                  -> "h2c",
+                "Sec-WebSocket-Accept"     -> "bad-accept",
+                "Sec-WebSocket-Extensions" -> "bad-extension",
+                "Sec-WebSocket-Protocol"   -> "bad-protocol",
+                "Sec-WebSocket-Future"     -> "bad-future",
+                "X-WebSocket-Trace"        -> "allowed"
+              )
+          }
+        ) { (app, port) =>
+          val responseHeaderSeq = runWebSocket(
+            port,
+            { flow =>
+              sendFrames(TextMessage("foo"), CloseMessage(1000)).via(flow).runWith(Sink.ignore)(app.materializer)
+            },
+            None,
+            c => c,
+            CompressionMode.Disabled
+          )._2
+          val responseHeaders = responseHeaderSeq.map { case (key, value) => (key.toLowerCase, value) }
+          responseHeaders must contain("x-websocket-trace" -> "allowed")
+          responseHeaders.contains("connection" -> "close") must beFalse
+          responseHeaders.contains("content-length" -> "42") must beFalse
+          responseHeaders.collect { case ("transfer-encoding", value) => value } must beEmpty
+          responseHeaders.contains("upgrade" -> "h2c") must beFalse
+          responseHeaders.contains("sec-websocket-accept" -> "bad-accept") must beFalse
+          responseHeaders.collect { case ("sec-websocket-extensions", value) => value } must beEmpty
+          responseHeaders.collect { case ("sec-websocket-protocol", value) => value } must beEmpty
+          responseHeaders.collect { case ("sec-websocket-future", value) => value } must beEmpty
+        }
+      }
+
+      "reject invalid application supplied WebSocket handshake headers" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            val flow: Flow[String, String, ?] = Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String])
+            WebSocket
+              .Accepted(flow)
+              .withHeaders("X-WebSocket-Trace" -> "trace\r\nInjected: true")
+          }
+        ) { (app, port) =>
+          webSocketHandshakeStatus(app, port, None) must_== INTERNAL_SERVER_ERROR
+        }
+      }
+
+      "reject invalid application supplied WebSocket handshake cookie headers" in {
+        withServer(app =>
+          WebSocket.acceptWithOptions[String, String] { req =>
+            val flow: Flow[String, String, ?] = Flow.fromSinkAndSource(Sink.ignore, Source.maybe[String])
+            WebSocket
+              .Accepted(flow)
+              .withHeaders("Set-Cookie" -> "websocket=connected\r\nInjected: true")
+          }
+        ) { (app, port) =>
+          webSocketHandshakeStatus(app, port, None) must_== INTERNAL_SERVER_ERROR
+        }
+      }
+
       // we keep getting timeouts on this test
       // java.util.concurrent.TimeoutException: Futures timed out after [5 seconds] (Helpers.scala:186)
       "close the websocket when the wrong type of frame is received" in {
@@ -1391,6 +1536,57 @@ trait WebSocketSpec
             exactly(
               closeFrame(1003)
             )
+          )
+        }
+      }
+
+      "allow adding handshake headers and cookies" in {
+        withServer(
+          _ => WebSocketSpecJavaActions.addHandshakeHeadersAndCookies(),
+          Map("play.http.session.cookieName" -> "JAVA_SESSION")
+        ) { (app, port) =>
+          import app.materializer
+          val (frames, headers) = runWebSocket(
+            port,
+            { flow => Source.maybe[ExtendedMessage].via(flow).runWith(consumeFrames) },
+            Some("graphql-ws, graphql-transport-ws"),
+            c => c,
+            CompressionMode.RequestOnly()
+          )
+          val responseHeaders = headers.map { case (key, value) => (key.toLowerCase, value) }
+
+          responseHeaders.collect { case ("sec-websocket-protocol", value) => value } must contain(
+            exactly("graphql-transport-ws")
+          )
+          responseHeaders.collect { case ("sec-websocket-extensions", value) => value } must beEmpty
+          responseHeaders must contain("x-websocket-trace" -> "java-trace")
+          responseHeaders.collect { case ("x-websocket-trace", value) => value } must contain(
+            exactly("java-trace")
+          )
+          responseHeaders.collect { case ("x-remove", value) => value } must beEmpty
+          frames.collectFirst {
+            case SimpleMessage(TextMessage(data), true) => data
+          } must beSome("plain server message")
+
+          val cookieHeaderEncoding = app.injector.instanceOf[CookieHeaderEncoding]
+          val responseCookies      = responseHeaders
+            .collect { case ("set-cookie", value) => value }
+            .flatMap(cookieHeaderEncoding.decodeSetCookieHeader)
+          responseCookies.count(_.name == "java-raw-cookie") must_== 1
+          responseCookies.find(_.name == "java-raw-cookie").map(_.value) must beSome("raw-value")
+          responseCookies.find(_.name == "java-ws-cookie").map(_.value) must beSome("cookie-value")
+          responseCookies.find(_.name == "java-expired") must beSome[Cookie].like {
+            case cookie =>
+              (cookie.maxAge must beSome(Cookie.DiscardedMaxAge))
+                .and(cookie.secure must beTrue)
+                .and(cookie.sameSite must_== Some(Cookie.SameSite.Lax))
+                .and(cookie.partitioned must beTrue)
+          }
+
+          val sessionBaker = app.injector.instanceOf[SessionCookieBaker]
+          sessionBaker.COOKIE_NAME must_== "JAVA_SESSION"
+          sessionBaker.decodeFromCookie(responseCookies.find(_.name == sessionBaker.COOKIE_NAME)).data must_== Map(
+            "websocket" -> "connected"
           )
         }
       }

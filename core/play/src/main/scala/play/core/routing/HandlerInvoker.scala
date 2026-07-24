@@ -9,6 +9,7 @@ import java.util.concurrent.CompletionStage
 import java.util.Optional
 
 import scala.concurrent.Future
+import scala.jdk.CollectionConverters._
 import scala.jdk.FutureConverters._
 import scala.jdk.OptionConverters._
 import scala.util.control.NonFatal
@@ -233,7 +234,10 @@ object HandlerInvokerFactory {
                                 context.payloadLength,
                                 context.isAboveCompressionThreshold
                               )
-                            )
+                            ),
+                        Headers(accepted.headers().asScala.map(header => header.getKey -> header.getValue).toSeq*),
+                        accepted.cookies().asScala.map(_.asScala()).toSeq,
+                        accepted.session().toScala.map(_.asScala())
                       )
                     )
                   }

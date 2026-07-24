@@ -313,6 +313,25 @@ private[play] final class ServerResultUtils(
   }
 
   /**
+   * Bake cookies and return validated headers that may be added to a WebSocket upgrade response.
+   */
+  def prepareWebSocketHandshakeHeaders(accepted: WebSocket.Accepted[?, ?]): Seq[(String, String)] = {
+    val baked = accepted.bakeCookies(cookieHeaderEncoding, sessionBaker)
+    WebSocket
+      .allowedHandshakeResponseHeaders(baked.headers)
+      .flatMap {
+        case (name, value) if name.equalsIgnoreCase(SET_COOKIE) =>
+          splitSetCookieHeaderValue(value).map(SET_COOKIE -> _)
+        case header => header :: Nil
+      }
+      .map { header =>
+        validateHeaderNameChars(header._1)
+        validateHeaderValueChars(header._2)
+        header
+      }
+  }
+
+  /**
    * Given a map of headers, split it into a sequence of individual headers.
    * Most headers map into a single pair in the new sequence. The exception is
    * the `Set-Cookie` header which we split into a pair for each cookie it
