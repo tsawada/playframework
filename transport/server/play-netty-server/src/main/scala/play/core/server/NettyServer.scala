@@ -36,7 +36,11 @@ import io.netty.channel.uring.IoUringServerSocketChannel
 import io.netty.handler.codec.compression.ZlibCodecFactory
 import io.netty.handler.codec.http._
 import io.netty.handler.codec.http.websocketx.extensions.compression.PerMessageDeflateServerExtensionHandshaker
+import io.netty.handler.codec.http.websocketx.extensions.WebSocketExtensionFilter
+import io.netty.handler.codec.http.websocketx.extensions.WebSocketExtensionFilterProvider
 import io.netty.handler.codec.http.websocketx.extensions.WebSocketServerExtensionHandler
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame
+import io.netty.handler.codec.http.websocketx.TextWebSocketFrame
 import io.netty.handler.logging.LogLevel
 import io.netty.handler.logging.LoggingHandler
 import io.netty.handler.ssl.SslHandler
@@ -102,6 +106,7 @@ class NettyServer(
   private val wsKeepAliveMaxIdle       = serverConfig.get[Duration]("websocket.periodic-keep-alive-max-idle")
   private val wsCompression            = serverConfig.get[Boolean]("websocket.compression.enabled")
   private val wsCompressionConfig      = serverConfig.get[Configuration]("websocket.compression")
+  private val wsCompressionThreshold   = wsCompressionConfig.get[ConfigMemorySize]("threshold").toBytes
   private val nettyWsCompressionConfig = nettyConfig.get[Configuration]("websocket.compression")
   private val wsCompressionSettings    =
     if (!wsCompression) {
@@ -345,6 +350,15 @@ class NettyServer(
 
   private def newWebSocketCompressionHandler(): Option[ChannelHandler] = {
     wsCompressionSettings.map { settings =>
+      val compressionFilterProvider = new WebSocketExtensionFilterProvider {
+        override val encoderFilter: WebSocketExtensionFilter = {
+          case frame: TextWebSocketFrame   => frame.content().readableBytes().toLong <= wsCompressionThreshold
+          case frame: BinaryWebSocketFrame => frame.content().readableBytes().toLong <= wsCompressionThreshold
+          case _                           => false
+        }
+        override val decoderFilter: WebSocketExtensionFilter = WebSocketExtensionFilter.NEVER_SKIP
+      }
+
       new WebSocketServerExtensionHandler(
         new PerMessageDeflateServerExtensionHandshaker(
           settings.compressionLevel,
@@ -354,6 +368,7 @@ class NettyServer(
           settings.preferredClientNoContext,
           settings.serverWindowSize,
           settings.memLevel,
+          compressionFilterProvider,
           settings.maxAllocation
         )
       ) {
