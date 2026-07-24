@@ -44,7 +44,8 @@ trait WebSocket extends Handler {
  * Helper utilities to generate WebSocket results.
  */
 object WebSocket {
-  private val SubprotocolHeader = "Sec-WebSocket-Protocol"
+  private val SubprotocolHeader                                    = "Sec-WebSocket-Protocol"
+  private val defaultShouldCompress: CompressionContext => Boolean = _.isAboveCompressionThreshold
 
   private def requestedSubprotocols(request: RequestHeader): Seq[String] = {
     request.headers
@@ -77,6 +78,22 @@ object WebSocket {
   }
 
   /**
+   * Information about an outbound WebSocket message for which Play is deciding whether to use compression.
+   *
+   * @param messageValue the final Play WebSocket message after applying the configured message flow transformer
+   * @param payloadLength the uncompressed payload length in bytes, after UTF-8 encoding for text messages
+   * @param isAboveCompressionThreshold whether the payload length is greater than the configured compression threshold
+   * @since 3.1.0
+   */
+  final class CompressionContext private[play] (
+      messageValue: => Message,
+      val payloadLength: Long,
+      val isAboveCompressionThreshold: Boolean
+  ) {
+    lazy val message: Message = messageValue
+  }
+
+  /**
    * An accepted WebSocket, including the flow that handles WebSocket messages and optional handshake metadata.
    *
    * @param flow the flow that handles WebSocket messages
@@ -85,11 +102,15 @@ object WebSocket {
    *                    [[play.api.http.HttpErrorHandler]], which returns an HTTP 500 response by default
    * @param compressionEnabled whether this accepted WebSocket may negotiate compression when compression is enabled in
    *                           the server configuration; setting this to `true` does not enable compression globally
+   * @param shouldCompress selects which outbound text and binary messages to compress after compression is negotiated;
+   *                       the default follows the configured compression threshold; this function must not block and
+   *                       an exception from it fails the WebSocket stream
    */
   case class Accepted[In, Out](
       flow: Flow[In, Out, ?],
       subprotocol: Option[String] = None,
-      compressionEnabled: Boolean = true
+      compressionEnabled: Boolean = true,
+      shouldCompress: CompressionContext => Boolean = defaultShouldCompress
   )
 
   /**
@@ -270,7 +291,8 @@ object WebSocket {
           Accepted(
             closeOnException(transformer.transform(accepted.flow)),
             accepted.subprotocol,
-            accepted.compressionEnabled
+            accepted.compressionEnabled,
+            accepted.shouldCompress
           )
         })
       }

@@ -304,6 +304,7 @@ class NettyServer(
       serverHeader,
       maxContentLength,
       wsBufferLimit,
+      wsCompressionThreshold,
       wsKeepAliveMode,
       wsKeepAliveMaxIdle,
       deferBodyParsing
@@ -352,9 +353,10 @@ class NettyServer(
     wsCompressionSettings.map { settings =>
       val compressionFilterProvider = new WebSocketExtensionFilterProvider {
         override val encoderFilter: WebSocketExtensionFilter = {
-          case frame: TextWebSocketFrame   => frame.content().readableBytes().toLong <= wsCompressionThreshold
-          case frame: BinaryWebSocketFrame => frame.content().readableBytes().toLong <= wsCompressionThreshold
-          case _                           => false
+          case frame: PlayWebSocketCompressionFrame => !frame.shouldCompress
+          case frame: TextWebSocketFrame            => frame.content().readableBytes().toLong <= wsCompressionThreshold
+          case frame: BinaryWebSocketFrame          => frame.content().readableBytes().toLong <= wsCompressionThreshold
+          case _                                    => false
         }
         override val decoderFilter: WebSocketExtensionFilter = WebSocketExtensionFilter.NEVER_SKIP
       }

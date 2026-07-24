@@ -16,9 +16,14 @@ import org.apache.pekko.util.ByteString
 import org.reactivestreams.Processor
 import play.api.http.websocket._
 import play.api.http.websocket.Message
+import play.api.mvc.WebSocket
 import play.core.server.common.WebSocketFlowHandler
 import play.core.server.common.WebSocketFlowHandler.MessageType
 import play.core.server.common.WebSocketFlowHandler.RawMessage
+
+private[server] trait PlayWebSocketCompressionFrame {
+  def shouldCompress: Boolean
+}
 
 private[server] object WebSocketHandler {
 
@@ -31,6 +36,8 @@ private[server] object WebSocketHandler {
   def messageFlowToFrameProcessor(
       flow: Flow[Message, Message, ?],
       bufferLimit: Int,
+      compressionThreshold: Long,
+      compressionSelector: WebSocket.CompressionContext => Boolean,
       wsKeepAliveMode: String,
       wsKeepAliveMaxIdle: Duration
   )(
@@ -45,7 +52,7 @@ private[server] object WebSocketHandler {
         .toProcessor
         .run(),
       frameToMessage,
-      messageToFrame
+      message => messageToFrame(message, compressionThreshold, compressionSelector)
     )
 
     new Processor[WebSocketFrame, WebSocketFrame] {
@@ -90,7 +97,11 @@ private[server] object WebSocketHandler {
   /**
    * Converts Play messages to Netty frames.
    */
-  private def messageToFrame(message: Message): WebSocketFrame = {
+  private def messageToFrame(
+      message: Message,
+      compressionThreshold: Long,
+      compressionSelector: WebSocket.CompressionContext => Boolean
+  ): WebSocketFrame = {
     def byteStringToByteBuf(bytes: ByteString): ByteBuf = {
       if (bytes.isEmpty) {
         Unpooled.EMPTY_BUFFER
@@ -99,9 +110,23 @@ private[server] object WebSocketHandler {
       }
     }
 
+    def compressionContext(payloadLength: Long) =
+      new WebSocket.CompressionContext(
+        message,
+        payloadLength,
+        payloadLength > compressionThreshold
+      )
+
     message match {
-      case TextMessage(data)                      => new TextWebSocketFrame(data)
-      case BinaryMessage(data)                    => new BinaryWebSocketFrame(byteStringToByteBuf(data))
+      case TextMessage(data) =>
+        val bytes = ByteString(data)
+        new TextWebSocketFrame(true, 0, byteStringToByteBuf(bytes)) with PlayWebSocketCompressionFrame {
+          override lazy val shouldCompress: Boolean = compressionSelector(compressionContext(bytes.length.toLong))
+        }
+      case BinaryMessage(data) =>
+        new BinaryWebSocketFrame(byteStringToByteBuf(data)) with PlayWebSocketCompressionFrame {
+          override lazy val shouldCompress: Boolean = compressionSelector(compressionContext(data.length.toLong))
+        }
       case PingMessage(data)                      => new PingWebSocketFrame(byteStringToByteBuf(data))
       case PongMessage(data)                      => new PongWebSocketFrame(byteStringToByteBuf(data))
       case CloseMessage(Some(statusCode), reason) => new CloseWebSocketFrame(statusCode, reason)
